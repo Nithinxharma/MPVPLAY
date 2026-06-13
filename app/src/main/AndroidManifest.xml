@@ -130,9 +130,6 @@
                 <data android:host="*"
                     tools:ignore="AppLinkUrlError" />
 
-                <!-- basically copied from mpv-android -->
-                <!-- the duplicate patterns below work around an Android bug: -->
-                <!-- http://stackoverflow.com/questions/3400072/#answer-8599921 -->
                 <data android:pathPattern=".*\\.mkv" />
                 <data android:pathPattern=".*\\..*\\.mkv" />
                 <data android:pathPattern=".*\\..*\\..*\\.mkv" />
@@ -287,7 +284,6 @@
             </intent-filter>
         </receiver>
 
-        <!-- Media scan receiver to detect when new videos are added -->
         <receiver
             android:name=".utils.media.MediaScanReceiver"
             android:exported="true">
