@@ -15,62 +15,65 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import app.marlboroadvance.mpvex.cinehub.model.MovieItem
 
 @Composable
 fun CineHubGridCard(
-    movie: MovieItem,
+    title: String,
+    genre: String,
+    rating: Double,
+    posterPath: String?,
     onClick: () -> Unit
 ) {
     Card(
         modifier = Modifier
-            .padding(4.dp)
+            .padding(6.dp) // Proper separation baseline for material grid grids
             .fillMaxWidth()
             .clickable { onClick() },
-        shape = RoundedCornerShape(6.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
     ) {
         Column {
             Box(modifier = Modifier.fillMaxWidth()) {
                 AsyncImage(
-                    model = movie.posterPath ?: android.R.drawable.ic_menu_gallery,
-                    contentDescription = movie.title,
+                    model = posterPath ?: android.R.drawable.ic_menu_gallery,
+                    contentDescription = title,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .aspectRatio(2f / 3f)
+                        .aspectRatio(2f / 3f) // Cinematic 2:3 layout poster ratio lock
                         .background(Color.DarkGray)
                 )
-                if (movie.userRating > 0) {
+                if (rating > 0) {
                     Box(
                         modifier = Modifier
-                            .padding(4.dp)
+                            .padding(6.dp)
                             .background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(4.dp))
-                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
                             .align(Alignment.TopStart)
                     ) {
                         Text(
-                            text = "★ ${movie.userRating}",
+                            text = "★ ${String.format("%.1f", rating)}",
                             color = Color(0xFFFFD700),
-                            fontSize = 10.sp,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
                 }
             }
-            Column(modifier = Modifier.padding(6.dp)) {
+            Column(modifier = Modifier.padding(8.dp)) {
                 Text(
-                    text = movie.title,
-                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = movie.genre.ifEmpty { "Unknown" },
+                    text = genre.ifEmpty { "Media" },
                     style = MaterialTheme.typography.bodySmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp)
                 )
             }
         }
