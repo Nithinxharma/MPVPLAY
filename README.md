@@ -1,4 +1,4 @@
-## mpvRex
+# MPV Play
 
 <p align="center">
   <img src="app/src/main/res/mipmap-xhdpi/ic_launcher.webp" width="128" height="128" />
