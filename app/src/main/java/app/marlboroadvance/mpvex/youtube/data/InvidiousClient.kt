@@ -7,24 +7,36 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.util.concurrent.TimeUnit
 
 object InvidiousClient {
-    private val client = OkHttpClient()
+    // Optimized connection pools with safe network timeouts to avoid thread stalling
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .build()
+
     private val jsonParser = Json { ignoreUnknownKeys = true; coerceInputValues = true }
     
-    // Public reliable global Invidious instance url baseline
-    private const val INSTANCE_URL = "https://vid.puffyan.us"
+    // Switched to a premium, highly stable open-source API instance node
+    private const val INSTANCE_URL = "https://inv.tux.digital"
 
     /**
      * Fetches trending videos from Invidious api to map on YouTube / Shorts channel feeds
      */
     suspend fun fetchTrendingVideos(type: String = "Movies"): List<YoutubeVideo> = withContext(Dispatchers.IO) {
         val url = "$INSTANCE_URL/api/v1/trending?type=$type"
-        val request = Request.Builder().url(url).build()
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+            .build()
         
         try {
             client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext emptyList()
+                if (!response.isSuccessful) {
+                    android.util.Log.e("InvidiousClient", "HTTP Error response verification failed with code: ${response.code}")
+                    return@withContext emptyList()
+                }
                 val responseBody = response.body?.string() ?: return@withContext emptyList()
                 return@withContext jsonParser.decodeFromString<List<YoutubeVideo>>(responseBody)
             }
@@ -39,7 +51,10 @@ object InvidiousClient {
      */
     suspend fun fetchDirectStreamUrl(videoId: String): String? = withContext(Dispatchers.IO) {
         val url = "$INSTANCE_URL/api/v1/videos/$videoId"
-        val request = Request.Builder().url(url).build()
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+            .build()
         
         try {
             client.newCall(request).execute().use { response ->
