@@ -1,7 +1,7 @@
 ## mpvRex
 
 <p align="center">
-  <img src="app/src/res/xxhdpi/ic_launcher.webp" width="128" height="128" />
+  <img src="main/res/mipmap-xhdpi/ic_launcher.webp" width="128" height="128" />
 </p>
 
 <p align="center">
