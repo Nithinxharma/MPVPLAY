@@ -10,98 +10,117 @@ import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit
 
 object InvidiousClient {
-    // Optimized connection pools with safe network timeouts to avoid thread stalling
+    // Aggressive timeouts ensure the app skips unresponsive nodes instantly
     private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(5, TimeUnit.SECONDS)
         .build()
 
     private val jsonParser = Json { ignoreUnknownKeys = true; coerceInputValues = true }
     
-    // Switched to a premium, highly stable open-source API instance node
-    private const val INSTANCE_URL = "https://inv.tux.digital"
+    // Fail-proof premium dynamic instances matrix with high availability
+    private val INSTANCES = listOf(
+        "https://invidious.projectsegfau.lt",
+        "https://yewtu.be",
+        "https://invidious.privacydev.net",
+        "https://iv.melmac.space"
+    )
 
     /**
-     * Fetches trending videos from Invidious api to map on YouTube / Shorts channel feeds
+     * Fetches trending videos from the first operational Invidious node in the pool
      */
     suspend fun fetchTrendingVideos(type: String = "Movies"): List<YoutubeVideo> = withContext(Dispatchers.IO) {
-        val url = "$INSTANCE_URL/api/v1/trending?type=$type"
-        val request = Request.Builder()
-            .url(url)
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-            .build()
-        
-        try {
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    android.util.Log.e("InvidiousClient", "HTTP Error response verification failed with code: ${response.code}")
-                    return@withContext emptyList()
+        for (baseUrl in INSTANCES) {
+            val url = "$baseUrl/api/v1/trending?type=$type"
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+                .build()
+            
+            try {
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val responseBody = response.body?.string() ?: return@use
+                        val data = jsonParser.decodeFromString<List<YoutubeVideo>>(responseBody)
+                        if (data.isNotEmpty()) {
+                            android.util.Log.d("InvidiousClient", "Trending videos fetched from node: $baseUrl")
+                            return@withContext data
+                        }
+                    }
                 }
-                val responseBody = response.body?.string() ?: return@withContext emptyList()
-                return@withContext jsonParser.decodeFromString<List<YoutubeVideo>>(responseBody)
+            } catch (e: Exception) {
+                android.util.Log.w("InvidiousClient", "Node $baseUrl connection timed out or failed. Shifting...")
             }
-        } catch (e: Exception) {
-            android.util.Log.e("InvidiousClient", "Structural transmission failure inside trend threads", e)
-            return@withContext emptyList()
         }
+        return@withContext emptyList()
     }
 
     /**
-     * Extracts direct stream mkv/mp4 download links to pass straight to internal MPV layout engine
+     * Extracts direct progressive play streams with dynamic redundant structural loops
      */
     suspend fun fetchDirectStreamUrl(videoId: String): String? = withContext(Dispatchers.IO) {
-        val url = "$INSTANCE_URL/api/v1/videos/$videoId"
-        val request = Request.Builder()
-            .url(url)
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-            .build()
-        
-        try {
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext null
-                val responseBody = response.body?.string() ?: return@withContext null
-                val parsed = jsonParser.decodeFromString<VideoDataResponse>(responseBody)
-                
-                // Return best resolution playable progressive stream url
-                return@withContext parsed.formatStreams.firstOrNull { it.container == "mp4" }?.url
-                    ?: parsed.formatStreams.firstOrNull()?.url
-                    ?: parsed.adaptiveFormats.firstOrNull { it.container == "mp4" }?.url
+        for (baseUrl in INSTANCES) {
+            val url = "$baseUrl/api/v1/videos/$videoId"
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+                .build()
+            
+            try {
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val responseBody = response.body?.string() ?: return@use
+                        val parsed = jsonParser.decodeFromString<VideoDataResponse>(responseBody)
+                        
+                        val streamUrl = parsed.formatStreams.firstOrNull { it.container == "mp4" }?.url
+                            ?: parsed.formatStreams.firstOrNull()?.url
+                            ?: parsed.adaptiveFormats.firstOrNull { it.container == "mp4" }?.url
+                        
+                        if (streamUrl != null) {
+                            android.util.Log.d("InvidiousClient", "Stream target resolved via node: $baseUrl")
+                            return@withContext streamUrl
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("InvidiousClient", "Stream collection rejected on node: $baseUrl. Retrying next source...")
             }
-        } catch (e: Exception) {
-            android.util.Log.e("InvidiousClient", "Format analytical link extraction failure on video token: $videoId", e)
-            return@withContext null
         }
+        return@withContext null
     }
 
     /**
-     * --- NEW: Integrated Search Pipeline Engine ---
-     * Searches global YouTube index database through Invidious query processing engines
+     * Searches global YouTube index database with active instance failover network switching
      */
     suspend fun fetchSearchVideos(query: String): List<YoutubeVideo> = withContext(Dispatchers.IO) {
-        val url = try {
-            val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
-            "$INSTANCE_URL/api/v1/search?q=$encodedQuery&type=video"
+        val encodedQuery = try {
+            java.net.URLEncoder.encode(query, "UTF-8")
         } catch (e: Exception) {
-            "$INSTANCE_URL/api/v1/search?q=$query&type=video"
+            query
         }
-        
-        val request = Request.Builder()
-            .url(url)
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-            .build()
-        
-        try {
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    android.util.Log.e("InvidiousClient", "HTTP Search verification failure with code: ${response.code}")
-                    return@withContext emptyList()
+
+        for (baseUrl in INSTANCES) {
+            val url = "$baseUrl/api/v1/search?q=$encodedQuery&type=video"
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+                .build()
+            
+            try {
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val responseBody = response.body?.string() ?: return@use
+                        val data = jsonParser.decodeFromString<List<YoutubeVideo>>(responseBody)
+                        if (data.isNotEmpty()) {
+                            android.util.Log.d("InvidiousClient", "Search query evaluation successful on node: $baseUrl")
+                            return@withContext data
+                        }
+                    }
                 }
-                val responseBody = response.body?.string() ?: return@withContext emptyList()
-                return@withContext jsonParser.decodeFromString<List<YoutubeVideo>>(responseBody)
+            } catch (e: Exception) {
+                android.util.Log.w("InvidiousClient", "Search compilation failed on node: $baseUrl. Trying failover redundancy...")
             }
-        } catch (e: Exception) {
-            android.util.Log.e("InvidiousClient", "Analytical search endpoint transmission failure", e)
-            return@withContext emptyList()
         }
+        return@withContext emptyList()
     }
 }
