@@ -34,7 +34,7 @@ import app.marlboroadvance.mpvex.cinehub.model.MovieItem
 import app.marlboroadvance.mpvex.cinehub.model.TvShowItem
 import app.marlboroadvance.mpvex.cinehub.model.EpisodeItem
 import app.marlboroadvance.mpvex.cinehub.data.NfoScanner
-import app.marlboroadvance.mpvex.youtube.data.InvidiousClient // Imported YouTube client integration
+import app.marlboroadvance.mpvex.youtube.data.InvidiousClient
 import app.marlboroadvance.mpvex.youtube.model.YoutubeVideo
 import app.marlboroadvance.mpvex.ui.browser.components.BrowserTopBar
 import kotlinx.coroutines.launch
@@ -152,7 +152,6 @@ fun CineHubScreen(
             selectedMovie?.let { movie ->
                 var trailerVideo by remember { mutableStateOf<YoutubeVideo?>(null) }
                 
-                // Automatically queries YouTube index for the movie's official trailer upon click
                 LaunchedEffect(movie) {
                     scope.launch {
                         val searchResults = InvidiousClient.fetchSearchVideos("${movie.title} official trailer")
@@ -171,8 +170,8 @@ fun CineHubScreen(
                             .fillMaxWidth()
                             .padding(start = 20.dp, end = 20.dp, bottom = 36.dp, top = 8.dp)
                     ) {
-                        // --- NEW: Premium Gradient Trailer Autoplay Window ---
                         item {
+                            // Animated Shimmer Gradient Configuration
                             val infiniteTransition = rememberInfiniteTransition(label = "GradientAnim")
                             val offset by infiniteTransition.animateFloat(
                                 initialValue = 0f,
@@ -184,13 +183,13 @@ fun CineHubScreen(
                                 label = "Offset"
                             )
                             
+                            // FIX: Cleaned and fixed LinearGradient parameters without layout modifiers
                             val animatedGradient = Brush.linearGradient(
                                 colors = listOf(
                                     MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
                                     MaterialTheme.colorScheme.tertiary.copy(alpha = 0.8f),
                                     MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
-                                ),
-                                modifier = Modifier
+                                )
                             )
 
                             Box(
@@ -218,7 +217,6 @@ fun CineHubScreen(
                                         contentScale = ContentScale.Crop,
                                         modifier = Modifier.fillMaxSize()
                                     )
-                                    // Soft overlay to mask thumbnail into layout aesthetics
                                     Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.2f)))
                                     
                                     Surface(
@@ -236,15 +234,10 @@ fun CineHubScreen(
                                         }
                                     }
                                 } else {
-                                    // Animated shimmer loader layout before stream asset mapping completes
                                     Box(
                                         modifier = Modifier
                                             .fillMaxSize()
-                                            .background(
-                                                Brush.linearGradient(
-                                                    colors = listOf(Color.Gray.copy(alpha = 0.1f), Color.DarkGray.copy(alpha = 0.2f), Color.Gray.copy(alpha = 0.1f))
-                                                )
-                                            ),
+                                            .background(Color.DarkGray.copy(alpha = 0.2f)),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(24.dp))
@@ -302,7 +295,6 @@ fun CineHubScreen(
 
             // --- TV SHOW DETAIL OVERLAY WITH SORTED EPISODES & MATERIAL YOU GLASSMORPHISM ---
             selectedTvShow?.let { show ->
-                // FIX: Sorting episodes in strict ascending sequence (Episode 1 -> 2 -> 3...)
                 val episodes = remember(show) { 
                     NfoScanner.scanTvShowEpisodes(File(show.folderPath))
                         .sortedBy { it.episode } 
@@ -339,13 +331,12 @@ fun CineHubScreen(
 
                         LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f, fill = false)) {
                             items(seasons[selectedSeasonTab] ?: emptyList()) { episode ->
-                                // --- UPGRADED: Material You Glassmorphic Layout Card ---
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .padding(vertical = 6.dp)
                                         .clip(RoundedCornerShape(16.dp))
-                                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)) // Semitransparent layer
+                                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
                                         .border(
                                             BorderStroke(0.5.dp, Color.White.copy(alpha = 0.15f)),
                                             RoundedCornerShape(16.dp)
