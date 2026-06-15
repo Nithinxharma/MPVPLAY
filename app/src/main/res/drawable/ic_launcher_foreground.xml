@@ -5,19 +5,23 @@
     android:viewportWidth="512"
     android:viewportHeight="512">
 
-    <group
-        android:scaleX="0.55"
-        android:scaleY="0.55"
-        android:translateX="120.12"
-        android:translateY="95.12">
-        <path
-            android:fillColor="#F4C542"
-            android:pathData="M215,135 L245,55 L275,127 L355,95 L365,175 L450,170 L385,235 L215,135 Z" />
-        <path
-            android:strokeColor="#ffffff"
-            android:strokeWidth="50"
-            android:strokeLineJoin="round"
-            android:strokeLineCap="round"
-            android:pathData="M150,165 Q150,145,170,155 L385,280 Q410,295,385,310 L175,430 Q150,445,150,415 Z" />
-    </group>
+    <!-- Outer Purple Circle -->
+    <path
+        android:fillColor="#8B5CF6"
+        android:pathData="M256,40
+                          A216,216 0 1,1 255.9,40 Z" />
+
+    <!-- Inner White Circle -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M256,140
+                          A116,116 0 1,1 255.9,140 Z" />
+
+    <!-- Play Triangle -->
+    <path
+        android:fillColor="#8B5CF6"
+        android:pathData="M225,200
+                          L225,312
+                          L320,256
+                          Z" />
 </vector>
