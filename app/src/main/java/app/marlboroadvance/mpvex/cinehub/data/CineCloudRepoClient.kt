@@ -24,12 +24,11 @@ object CineCloudRepoClient {
     )
 
     /**
-     * Regex fallback engine to extract data-post attributes and titles without Jsoup dependency
+     * Extracts content metrics cleanly without relying on external Jsoup library configurations
      */
     private fun parseHtmlToItems(html: String, isTv: Boolean): List<Any> {
         val extractedItems = mutableListOf<Any>()
         
-        // Pattern to look for data-post attributes inside links or elements
         val articleRegex = Regex("data-post=\"([^\"]+)\"[^>]*>.*?<span[^>]*>([^<]+)</span>")
         val matches = articleRegex.findAll(html)
         
@@ -70,7 +69,6 @@ object CineCloudRepoClient {
             }
         }
         
-        // Backup loose scanning fallback pattern if spans aren't tightly structured
         if (extractedItems.isEmpty()) {
             val looseRegex = Regex("data-post=\"([^\"]+)\"")
             val looseMatches = looseRegex.findAll(html).map { it.groupValues[1] }.distinct()
@@ -113,16 +111,21 @@ object CineCloudRepoClient {
     }
 
     /**
-     * Scrapes trending Movies from CNCVerse proxy networks natively using Regex patterns[span_0](start_span)[span_0](end_span)
+     * Scrapes trending Movies from CNCVerse proxy networks natively using clean builders
      */
     suspend fun fetchOnlineMovies(): List<MovieItem> = withContext(Dispatchers.IO) {
-        val targetUrl = "$CNC_MAIN_URL/mobile/home?app=1[span_1](start_span)"[span_1](end_span)
-        val requestBuilder = Request.Builder().url(targetUrl)
-        baseHeaders.forEach { (k, v) -> requestBuilder.addHeader(k, v) }
-        requestBuilder.addHeader("Cookie", "hd=on; ott=nf") // nf = Netflix catalog block[span_2](start_span)[span_2](end_span)
+        val targetUrl = "$CNC_MAIN_URL/mobile/home?app=1"
+        val builder = Request.Builder().url(targetUrl)
+        
+        // Append baseline verification parameters natively
+        baseHeaders.forEach { (key, value) -> 
+            builder.addHeader(key, value) 
+        }
+        builder.addHeader("Cookie", "hd=on; ott=nf")
 
         try {
-            client.newCall(requestBuilder.build()).execute().use { response ->
+            val request = builder.build()
+            client.newCall(request).execute().use { response ->
                 if (response.isSuccessful) {
                     val html = response.body?.string() ?: return@withContext emptyList()
                     @Suppress("UNCHECKED_CAST")
@@ -136,16 +139,20 @@ object CineCloudRepoClient {
     }
 
     /**
-     * Scrapes trending TV Shows from CNCVerse proxy networks natively using Regex patterns[span_3](start_span)[span_3](end_span)
+     * Scrapes trending TV Shows from CNCVerse proxy networks natively using clean builders
      */
     suspend fun fetchOnlineTvShows(): List<TvShowItem> = withContext(Dispatchers.IO) {
-        val targetUrl = "$CNC_MAIN_URL/mobile/home?app=1[span_4](start_span)"[span_4](end_span)
-        val requestBuilder = Request.Builder().url(targetUrl)
-        baseHeaders.forEach { (k, v) -> requestBuilder.addHeader(k, v) }
-        requestBuilder.addHeader("Cookie", "hd=on; ott=hs") // hs = Hotstar catalog block[span_5](start_span)[span_5](end_span)
+        val targetUrl = "$CNC_MAIN_URL/mobile/home?app=1"
+        val builder = Request.Builder().url(targetUrl)
+        
+        baseHeaders.forEach { (key, value) -> 
+            builder.addHeader(key, value) 
+        }
+        builder.addHeader("Cookie", "hd=on; ott=hs")
 
         try {
-            client.newCall(requestBuilder.build()).execute().use { response ->
+            val request = builder.build()
+            client.newCall(request).execute().use { response ->
                 if (response.isSuccessful) {
                     val html = response.body?.string() ?: return@withContext emptyList()
                     @Suppress("UNCHECKED_CAST")
@@ -159,17 +166,17 @@ object CineCloudRepoClient {
     }
 
     /**
-     * Decrypts underlying premium .m3u8 HLS direct streaming playback URLs[span_6](start_span)[span_6](end_span)
+     * Decrypts underlying premium .m3u8 HLS direct streaming playback URLs safely
      */
     suspend fun resolveDirectStreamUrl(postId: String, isTv: Boolean): String? = withContext(Dispatchers.IO) {
-        val targetOtt = if (isTv) "hs" else "nf[span_7](start_span)[span_8](start_span)"[span_7](end_span)[span_8](end_span)
-        val url = "$RESOLVER_NODE/newtv/player.php?id=$postId[span_9](start_span)"[span_9](end_span)
+        val targetOtt = if (isTv) "hs" else "nf"
+        val url = "$RESOLVER_NODE/newtv/player.php?id=$postId"
         
         val request = Request.Builder()
             .url(url)
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.0")
-            .header("X-Requested-With", "NetmirrorNewTV v1.0")
-            .header("Ott", targetOtt)
+            .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.0")
+            .addHeader("X-Requested-With", "NetmirrorNewTV v1.0")
+            .addHeader("Ott", targetOtt)
             .build()
 
         try {
