@@ -15,18 +15,12 @@ object NfoScanner {
         return extensions.contains(file.extension.lowercase())
     }
 
-    /**
-     * Strict baseline check to ensure file is inside CineRex/movies directory path
-     */
     private fun isStrictMoviePath(absolutePath: String): Boolean {
         val standardizedPath = absolutePath.replace("\\", "/")
         return standardizedPath.contains("/CineRex/movies/", ignoreCase = true) || 
                standardizedPath.contains("/Cinerex/movies/", ignoreCase = true)
     }
 
-    /**
-     * Strict baseline check to ensure file/folder is inside CineRex/tvshows directory path
-     */
     private fun isStrictTvShowPath(absolutePath: String): Boolean {
         val standardizedPath = absolutePath.replace("\\", "/")
         return standardizedPath.contains("/CineRex/tvshows/", ignoreCase = true) || 
@@ -40,7 +34,6 @@ object NfoScanner {
 
         directory.listFiles()?.forEach { file ->
             if (file.isFile && isVideoFile(file)) {
-                // STRICT BOUNDARY RULE: Only index if it's within CineRex/movies/*
                 if (isStrictMoviePath(file.absolutePath)) {
                     val specificNfo = File(directory, "${file.nameWithoutExtension}.nfo")
                     val genericNfo = File(directory, "movie.nfo")
@@ -49,7 +42,6 @@ object NfoScanner {
                     if (targetNfo != null) {
                         parseMovieNfo(targetNfo, file)?.let { movies.add(it) }
                     } else {
-                        // Online metadata fallback extraction if local movie NFO file is completely missing
                         val onlineMeta = CineOnlineScraper.searchOnlineMovieMetadata(file.name)
                         movies.add(
                             MovieItem(
@@ -79,20 +71,15 @@ object NfoScanner {
         val tvShows = mutableListOf<TvShowItem>()
         if (!directory.exists() || !directory.isDirectory) return tvShows
 
-        // STRICT BOUNDARY RULE: Only check inside CineRex/tvshows/*
         if (isStrictTvShowPath(directory.absolutePath)) {
             val tvShowNfo = File(directory, "tvshow.nfo")
-            
-            // To find individual show folder, check if its parent is strictly the 'tvshows' folder
             val parentFolderName = directory.parentFile?.name ?: ""
             val isMainShowFolder = parentFolderName.equals("tvshows", ignoreCase = true)
 
             if (isMainShowFolder) {
                 if (tvShowNfo.exists()) {
-                    // Priority A: Pull metadata straight from local tvshow.nfo if present
                     parseTvShowNfo(tvShowNfo, directory)?.let { tvShows.add(it) }
                 } else {
-                    // Priority B: Pull from online TMDB repository using clean folder name if tvshow.nfo is missing
                     val onlineMeta = CineOnlineScraper.searchOnlineTvMetadata(directory.name)
                     tvShows.add(
                         TvShowItem(
@@ -110,7 +97,6 @@ object NfoScanner {
             }
         }
 
-        // Recursively navigate subdirectories under the tvshows structure (e.g., ShowName -> Season 1)
         directory.listFiles()?.forEach { file ->
             if (file.isDirectory) {
                 tvShows.addAll(scanDirectoryForTvShows(file))
