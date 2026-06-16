@@ -114,7 +114,7 @@ object CineCloudRepoClient {
                         return
                     }
                 }
-            } catch (e: Exception) { /* Continue validation pool */ }
+            } catch (e: Exception) { /* Continue scanning pool */ }
         }
     }
 
@@ -157,13 +157,12 @@ object CineCloudRepoClient {
                 }
             }
         } catch (e: Exception) {
-            android.util.Log.e("CineCloudRepo", "Bypass sequence failure: " + e.message)
+            android.util.Log.e("CineCloudRepo", "Bypass failure: " + e.message)
         }
     }
 
-    private fun parseHtmlToItems(html: String, isTv: Boolean): List<Any> {
+    private fun parseHtmlToItems(html: String, targetPlatform: String): List<Any> {
         val extractedItems = mutableListOf<Any>()
-        
         val containerRegex = Regex("data-post=\"(\\d+)\"[^>]*>.*?<span[^>]*>([^<]+)</span>")
         var matches = containerRegex.findAll(html).toList()
         
@@ -177,141 +176,87 @@ object CineCloudRepoClient {
             val title = match.groupValues[2].trim()
             
             if (id.isNotBlank() && title.isNotBlank() && !title.equals("Later", ignoreCase = true)) {
-                if (isTv) {
+                if (targetPlatform == "hs" || targetPlatform == "dp") {
                     extractedItems.add(
                         TvShowItem(
-                            folderPath = "cnc_tv:$id",
+                            folderPath = "cnc_tv:$id:$targetPlatform",
                             title = title,
-                            plot = "Premium multi-language series catalog. Decrypted and direct streaming link resolution pipeline fully functional.",
-                            userRating = 8.6,
-                            genre = "Hotstar Live",
+                            plot = "Premium cloud streaming tracking metrics active. Direct m3u8 player synchronization ready.",
+                            userRating = 8.5,
+                            genre = if (targetPlatform == "hs") "Hotstar Series" else "Disney+ Originals",
                             premiered = "2026",
-                            studio = "Hotstar Mirror",
+                            studio = if (targetPlatform == "hs") "Hotstar Mirror" else "Disney+ Studio",
                             posterPath = "https://imgcdn.kim/hs/v/$id.jpg"
                         )
                     )
                 } else {
                     extractedItems.add(
                         MovieItem(
-                            videoFilePath = "cnc_stream:$id",
+                            videoFilePath = "cnc_stream:$id:$targetPlatform",
                             title = title,
-                            originalTitle = "Netflix Mirror",
-                            userRating = 8.4,
-                            plot = "CNCVerse Premium Stream Link. High-speed multi-language audio layers are fully active inside player nodes.",
+                            originalTitle = if (targetPlatform == "nf") "Netflix" else "Prime Video",
+                            userRating = 8.3,
+                            plot = "Premium cloud progressive stream block active. Ready for native MPV engine hardware render loops.",
                             mpaa = "UA",
-                            genre = "Netflix Live",
+                            genre = if (targetPlatform == "nf") "Netflix Release" else "Prime Video Blockbuster",
                             director = "CNCVerse",
                             premiered = "2026",
-                            posterPath = "https://imgcdn.kim/poster/v/$id.jpg"
+                            posterPath = if (targetPlatform == "nf") "https://imgcdn.kim/poster/v/$id.jpg" else "https://imgcdn.kim/pv/v/$id.jpg"
                         )
                     )
-                }
-            }
-        }
-        
-        if (extractedItems.isEmpty()) {
-            val dynamicPostIdRegex = Regex("data-post=\"(\\d+)\"")
-            val rawDistinctIds = dynamicPostIdRegex.findAll(html).map { it.groupValues[1] }.distinct().toList()
-            
-            rawDistinctIds.forEachIndexed { index, id ->
-                if (index < 16) {
-                    if (isTv) {
-                        extractedItems.add(
-                            TvShowItem(
-                                folderPath = "cnc_tv:$id",
-                                title = "Premium Web Series $id",
-                                plot = "Cloud repository stream matching configurations are fully integrated.",
-                                userRating = 8.5,
-                                genre = "Hotstar Series",
-                                premiered = "2026",
-                                studio = "CNCVerse",
-                                posterPath = "https://imgcdn.kim/hs/v/$id.jpg"
-                            )
-                        )
-                    } else {
-                        extractedItems.add(
-                            MovieItem(
-                                videoFilePath = "cnc_stream:$id",
-                                title = "Blockbuster Movie $id",
-                                originalTitle = "Cloud Stream",
-                                userRating = 8.2,
-                                plot = "Cloud repository stream matching configurations are fully integrated.",
-                                mpaa = "UA",
-                                genre = "Netflix Movie",
-                                director = "CNCVerse",
-                                premiered = "2026",
-                                posterPath = "https://imgcdn.kim/poster/v/$id.jpg"
-                            )
-                        )
-                    }
                 }
             }
         }
         return extractedItems
     }
 
-    val fetchedMoviesCache = mutableListOf<MovieItem>()
-
-    suspend fun fetchOnlineMovies(): List<MovieItem> = withContext(Dispatchers.IO) {
+    private suspend fun fetchPlatformRawHtml(ottCode: String): String {
         ensureValidSession()
-        
         val requestBuilder = Request.Builder().url("$workingDomain/mobile/home?app=1")
         for (headerEntry in standardHeaders) {
             requestBuilder.addHeader(headerEntry.key, headerEntry.value)
         }
-        requestBuilder.addHeader("Cookie", "t_hash_t=$activeSessionCookie; hd=on; ott=nf")
-
-        try {
-            client.newCall(requestBuilder.build()).execute().use { response ->
-                if (response.isSuccessful || response.code == 200) {
-                    val htmlBody = response.body?.string() ?: return@withContext emptyList()
-                    @Suppress("UNCHECKED_CAST")
-                    val items = parseHtmlToItems(htmlBody, false) as List<MovieItem>
-                    if (items.isNotEmpty()) {
-                        fetchedMoviesCache.clear()
-                        fetchedMoviesCache.addAll(items)
-                        return@withContext items
-                    }
-                }
+        requestBuilder.addHeader("Cookie", "t_hash_t=$activeSessionCookie; hd=on; ott=$ottCode")
+        
+        return try {
+            client.newCall(requestBuilder.build()).execute().use { r ->
+                if (r.isSuccessful) r.body?.string() ?: "" else ""
             }
-        } catch (e: Exception) {
-            android.util.Log.e("CineCloudRepo", "Movie channel fetch breakdown: " + e.message)
-        }
-        return@withContext fetchedMoviesCache.ifEmpty { emptyList() }
+        } catch (e: Exception) { "" }
     }
 
-    val fetchedTvShowsCache = mutableListOf<TvShowItem>()
+    // --- STREAM AGGREGATION SYSTEM ---
+    suspend fun fetchOnlineMovies(): List<MovieItem> = withContext(Dispatchers.IO) {
+        val aggregatedMovies = mutableListOf<MovieItem>()
+        
+        // Fetch both Netflix (nf) and Prime Video (pv) paths dynamically
+        val netflixHtml = fetchPlatformRawHtml("nf")
+        val primeHtml = fetchPlatformRawHtml("pv")
+
+        @Suppress("UNCHECKED_CAST")
+        aggregatedMovies.addAll(parseHtmlToItems(netflixHtml, "nf") as List<MovieItem>)
+        @Suppress("UNCHECKED_CAST")
+        aggregatedMovies.addAll(parseHtmlToItems(primeHtml, "pv") as List<MovieItem>)
+
+        return@withContext aggregatedMovies.distinctBy { it.videoFilePath }.take(24)
+    }
 
     suspend fun fetchOnlineTvShows(): List<TvShowItem> = withContext(Dispatchers.IO) {
-        ensureValidSession()
-        
-        val requestBuilder = Request.Builder().url("$workingDomain/mobile/home?app=1")
-        for (headerEntry in standardHeaders) {
-            requestBuilder.addHeader(headerEntry.key, headerEntry.value)
-        }
-        requestBuilder.addHeader("Cookie", "t_hash_t=$activeSessionCookie; hd=on; ott=hs")
+        val aggregatedTv = mutableListOf<TvShowItem>()
 
-        try {
-            client.newCall(requestBuilder.build()).execute().use { response ->
-                if (response.isSuccessful || response.code == 200) {
-                    val htmlBody = response.body?.string() ?: return@withContext emptyList()
-                    @Suppress("UNCHECKED_CAST")
-                    val items = parseHtmlToItems(htmlBody, true) as List<TvShowItem>
-                    if (items.isNotEmpty()) {
-                        fetchedTvShowsCache.clear()
-                        fetchedTvShowsCache.addAll(items)
-                        return@withContext items
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            android.util.Log.e("CineCloudRepo", "TV channel fetch breakdown: " + e.message)
-        }
-        return@withContext fetchedTvShowsCache.ifEmpty { emptyList() }
+        // Fetch both Hotstar (hs) and Disney+ (dp) paths dynamically
+        val hotstarHtml = fetchPlatformRawHtml("hs")
+        val disneyHtml = fetchPlatformRawHtml("dp")
+
+        @Suppress("UNCHECKED_CAST")
+        aggregatedTv.addAll(parseHtmlToItems(hotstarHtml, "hs") as List<TvShowItem>)
+        @Suppress("UNCHECKED_CAST")
+        aggregatedTv.addAll(parseHtmlToItems(disneyHtml, "dp") as List<TvShowItem>)
+
+        return@withContext aggregatedTv.distinctBy { it.folderPath }.take(24)
     }
 
-    suspend fun resolveDirectStreamUrl(postId: String, isTv: Boolean): String? = withContext(Dispatchers.IO) {
-        val targetOtt = if (isTv) "hs" else "nf"
+    suspend fun resolveDirectStreamUrl(postId: String, platformCode: String): String? = withContext(Dispatchers.IO) {
         val activeResolverNode = fetchLiveApiUrl()
         val playerUrl = "$activeResolverNode/newtv/player.php?id=$postId"
         
@@ -319,13 +264,13 @@ object CineCloudRepoClient {
             .url(playerUrl)
             .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.0 /OS.GatuNewTV v1.0")
             .addHeader("X-Requested-With", "NetmirrorNewTV v1.0")
-            .addHeader("Ott", targetOtt)
+            .addHeader("Ott", platformCode)
             .build()
 
         try {
             client.newCall(request).execute().use { response ->
                 if (response.isSuccessful) {
-                    val body = response.body?.string() ?: return@withContext null
+                    val body = response.body?.string() ?: ""
                     if (body.contains("\"video_link\":\"")) {
                         val decryptedPath = body.substringAfter("\"video_link\":\"").substringBefore("\"")
                         return@withContext decryptedPath.replace("\\/", "/")
@@ -333,7 +278,7 @@ object CineCloudRepoClient {
                 }
             }
         } catch (e: Exception) {
-            android.util.Log.e("CineCloudRepo", "Decryption trace logs failure: " + e.message)
+            android.util.Log.e("CineCloudRepo", "Decryption logs crash: " + e.message)
         }
         return@withContext null
     }
