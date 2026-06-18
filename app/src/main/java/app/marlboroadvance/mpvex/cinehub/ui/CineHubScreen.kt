@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
@@ -40,7 +41,6 @@ import app.marlboroadvance.mpvex.cinehub.data.CineCloudRepoClient
 import app.marlboroadvance.mpvex.youtube.data.InvidiousClient
 import app.marlboroadvance.mpvex.youtube.model.YoutubeVideo
 import app.marlboroadvance.mpvex.ui.browser.components.BrowserTopBar
-import kotlinx.coroutines.launch
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -73,7 +73,7 @@ fun CineHubScreen(
                     onlineMovies = CineCloudRepoClient.fetchOnlineMovies(context)
                     onlineTvShows = CineCloudRepoClient.fetchOnlineTvShows(context)
                 } catch (e: Exception) {
-                    android.util.Log.e("CineHubUI", "Network aggregation fault: " + e.message)
+                    android.util.Log.e("CineHubUI", "Network fault bypass: " + e.message)
                 } finally {
                     isOnlineLoading = false
                 }
@@ -122,7 +122,7 @@ fun CineHubScreen(
                 .padding(innerPadding),
             contentPadding = PaddingValues(bottom = 24.dp)
         ) {
-            // ================= SECTION 1: NATIVE LOCAL MEDIA ROW SLIDER =================
+            // ================= LAYER 1: PREMIUM MY LOCAL MEDIA ROW SLIDER =================
             item {
                 Text(
                     text = if (tabIndex == 0) "My Local Movies" else "My Local TV Series",
@@ -152,6 +152,7 @@ fun CineHubScreen(
                                         genre = movie.genre,
                                         rating = movie.userRating,
                                         posterPath = movie.posterPath,
+                                        watchProgress = movie.watchProgress,
                                         onClick = { selectedMovie = movie }
                                     )
                                 }
@@ -176,6 +177,7 @@ fun CineHubScreen(
                                         genre = show.genre,
                                         rating = show.userRating,
                                         posterPath = show.posterPath,
+                                        watchProgress = show.watchProgress,
                                         onClick = { selectedTvShow = show }
                                     )
                                 }
@@ -185,7 +187,7 @@ fun CineHubScreen(
                 }
             }
 
-            // ================= SECTION 2: MATERIAL YOU 3 TRENDING ONLINE GRIDS =================
+            // ================= LAYER 2: CLEAN TRENDING RELEASES MATRICES =================
             item {
                 Text(
                     text = "Trending Online Releases",
@@ -229,6 +231,7 @@ fun CineHubScreen(
                                                     genre = movieItem.genre,
                                                     rating = movieItem.userRating,
                                                     posterPath = movieItem.posterPath,
+                                                    watchProgress = 0f,
                                                     onClick = {
                                                         scope.launch {
                                                             val rawId = movieItem.videoFilePath.substringAfter("cnc_stream:").substringBefore(":")
@@ -279,6 +282,7 @@ fun CineHubScreen(
                                                     genre = tvShowItem.genre,
                                                     rating = tvShowItem.userRating,
                                                     posterPath = tvShowItem.posterPath,
+                                                    watchProgress = 0f,
                                                     onClick = {
                                                         scope.launch {
                                                             val rawId = tvShowItem.folderPath.substringAfter("cnc_tv:").substringBefore(":")
@@ -307,10 +311,11 @@ fun CineHubScreen(
             }
         }
 
-        // --- MOVIES DETAIL BOTTOM SHEET ---
+        // --- MOVIES DETAIL OVERELAY METADATA SHEET ---
         selectedMovie?.let { movie ->
             if (!movie.videoFilePath.startsWith("cnc_stream:")) {
                 var trailerVideo by remember { mutableStateOf<YoutubeVideo?>(null) }
+                val movieActors = remember(movie) { NfoScanner.parseActorsFromNfo(File(movie.videoFilePath.replace(File(movie.videoFilePath).name, "movie.nfo"))) }
                 
                 LaunchedEffect(movie) {
                     scope.launch {
@@ -425,6 +430,36 @@ fun CineHubScreen(
                                     Text("Genre: ${movie.genre}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                                 }
                             }
+                            
+                            // ================= MOVIE CAST MEMEBERS ROW SLIDER =================
+                            if (movieActors.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text("Cast Members", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 6.dp))
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    items(movieActors) { (name, imgUrl) ->
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
+                                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                        ) {
+                                            AsyncImage(
+                                                model = imgUrl,
+                                                contentDescription = name,
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier.size(32.dp).clip(CircleShape).background(Color.Gray)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(name, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                        }
+                                    }
+                                }
+                            }
+
                             Spacer(modifier = Modifier.height(20.dp))
                             Button(
                                 onClick = {
@@ -452,15 +487,14 @@ fun CineHubScreen(
             }
         }
 
-        // --- TV SHOW DETAIL OVERLAY WITH MATERIAL YOU GLASSMORPHISM ---
+        // --- TV SHOWS DETAIL OVERLAY WITH SORTED EPISODES & MATERIAL YOU GLASSMORPHISM ---
         selectedTvShow?.let { show ->
             if (!show.folderPath.startsWith("cnc_tv:")) {
-                val episodes = remember(show) {
-                    NfoScanner.scanTvShowEpisodes(File(show.folderPath))
-                        .sortedBy { it.episode }
-                }
+                val showNfoFile = remember(show) { File(show.folderPath, "tvshow.nfo") }
+                val episodes = remember(show) { NfoScanner.scanTvShowEpisodes(File(show.folderPath)).sortedBy { it.episode } }
                 val seasons = remember(episodes) { episodes.groupBy { it.season }.toSortedMap() }
                 var selectedSeasonTab by remember { mutableStateOf(seasons.keys.firstOrNull() ?: 1) }
+                val tvActors = remember(show) { NfoScanner.parseActorsFromNfo(showNfoFile) }
 
                 ModalBottomSheet(
                     onDismissRequest = { selectedTvShow = null },
@@ -469,8 +503,36 @@ fun CineHubScreen(
                     Column(modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 36.dp, top = 8.dp)) {
                         Text(show.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold)
                         Text("Studio: ${show.studio} | Genre: ${show.genre}", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
-                        Spacer(modifier = Modifier.height(14.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
                         
+                        // ================= TV SHOWS CAST MEMBERS ROW SLIDER =================
+                        if (tvActors.isNotEmpty()) {
+                            Text("Cast Members", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 6.dp))
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp)
+                            ) {
+                                items(tvActors) { (name, portraitUrl) ->
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
+                                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                                    ) {
+                                        AsyncImage(
+                                            model = portraitUrl,
+                                            contentDescription = name,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.size(32.dp).clip(CircleShape).background(Color.Gray)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(name, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+                                    }
+                                }
+                            }
+                        }
+
                         if (seasons.keys.size > 1) {
                             ScrollableTabRow(
                                 selectedTabIndex = seasons.keys.indexOf(selectedSeasonTab).coerceAtLeast(0),
@@ -491,6 +553,7 @@ fun CineHubScreen(
 
                         LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f, fill = false)) {
                             items(seasons[selectedSeasonTab] ?: emptyList()) { episode ->
+                                val epNfoProgress = remember(episode) { NfoScanner.parseWatchProgress(File(episode.videoFilePath.replace(File(episode.videoFilePath).extension, "nfo"))) }
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -502,38 +565,50 @@ fun CineHubScreen(
                                             RoundedCornerShape(16.dp)
                                         )
                                 ) {
-                                    Row(
-                                        modifier = Modifier.padding(16.dp).fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                "Episode ${episode.episode}: ${episode.title}",
-                                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
-                                                color = MaterialTheme.colorScheme.onSurface
-                                            )
-                                            if (episode.plot.isNotEmpty()) {
-                                                Spacer(modifier = Modifier.height(4.dp))
+                                    Column(modifier = Modifier.fillMaxWidth()) {
+                                        Row(
+                                            modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
                                                 Text(
-                                                    episode.plot,
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    maxLines = 2,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f)
+                                                    "Episode ${episode.episode}: ${episode.title}",
+                                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
+                                                    color = MaterialTheme.colorScheme.onSurface
                                                 )
+                                                if (episode.plot.isNotEmpty()) {
+                                                    Spacer(modifier = Modifier.height(4.dp))
+                                                    Text(
+                                                        episode.plot,
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        maxLines = 2,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f)
+                                                    )
+                                                }
+                                            }
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            IconButton(
+                                                onClick = {
+                                                    selectedTvShow = null
+                                                    onPlayRequested(episode.videoFilePath, "${show.title} - S${episode.season}E${episode.episode}")
+                                                },
+                                                colors = IconButtonDefaults.iconButtonColors(
+                                                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                                                )
+                                            ) {
+                                                Icon(Icons.Default.PlayArrow, contentDescription = "Play Episode", tint = MaterialTheme.colorScheme.onPrimaryContainer)
                                             }
                                         }
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        IconButton(
-                                            onClick = {
-                                                selectedTvShow = null
-                                                onPlayRequested(episode.videoFilePath, "${show.title} - S${episode.season}E${episode.episode}")
-                                            },
-                                            colors = IconButtonDefaults.iconButtonColors(
-                                                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                                        
+                                        // --- INLINE EPISODE PROGRESS TRACKING BAR ---
+                                        if (epNfoProgress > 0f) {
+                                            LinearProgressIndicator(
+                                                progress = { epNfoProgress },
+                                                modifier = Modifier.fillMaxWidth().height(3.dp),
+                                                color = MaterialTheme.colorScheme.error,
+                                                trackColor = Color.Transparent
                                             )
-                                        ) {
-                                            Icon(Icons.Default.PlayArrow, contentDescription = "Play Episode", tint = MaterialTheme.colorScheme.onPrimaryContainer)
                                         }
                                     }
                                 }
