@@ -4,6 +4,7 @@ import android.util.Log
 import app.marlboroadvance.mpvex.cinehub.model.MovieItem
 import app.marlboroadvance.mpvex.cinehub.model.TvShowItem
 import app.marlboroadvance.mpvex.cinehub.model.EpisodeItem
+import app.marlboroadvance.mpvex.cinehub.model.ActorItem
 import org.w3c.dom.Document
 import org.w3c.dom.Element
 import org.w3c.dom.Node
@@ -56,7 +57,9 @@ object NfoScanner {
                                 genre = "Local Movie",
                                 director = "Unknown",
                                 premiered = onlineMeta?.premiered ?: "2026",
-                                posterPath = onlineMeta?.posterPath
+                                posterPath = onlineMeta?.posterPath,
+                                watchProgress = 0f,
+                                actors = emptyList()
                             )
                         )
                     }
@@ -92,7 +95,9 @@ object NfoScanner {
                             genre = "Local Series",
                             premiered = "2026",
                             studio = "Unknown",
-                            posterPath = null
+                            posterPath = null,
+                            watchProgress = 0f,
+                            actors = emptyList()
                         )
                     )
                 }
@@ -126,7 +131,8 @@ object NfoScanner {
                             episode = extractEpisodeNumber(file.name),
                             plot = "Local Media File. Multi-source scraping pipeline links active.",
                             userRating = 0.0,
-                            aired = "2026"
+                            aired = "2026",
+                            watchProgress = 0f
                         )
                     )
                 }
@@ -174,7 +180,9 @@ object NfoScanner {
                 genre = genre,
                 director = director,
                 premiered = premiered,
-                posterPath = resolvePosterWithFallback(nfoFile, root)
+                posterPath = resolvePosterWithFallback(nfoFile, root),
+                watchProgress = 0f, // Track status bypassed to native MPVrex player cache engine
+                actors = parseActorsFromNfo(doc)
             )
         } catch (e: Exception) {
             Log.e("CineHubScanner", "Error processing movie XML: ${nfoFile.name}", e)
@@ -203,7 +211,9 @@ object NfoScanner {
                 genre = genre,
                 premiered = premiered,
                 studio = studio,
-                posterPath = resolvePosterWithFallback(nfoFile, root)
+                posterPath = resolvePosterWithFallback(nfoFile, root),
+                watchProgress = 0f, // Track status bypassed to native MPVrex player cache engine
+                actors = parseActorsFromNfo(doc)
             )
         } catch (e: Exception) {
             Log.e("CineHubScanner", "Error processing tvshow XML: ${nfoFile.name}", e)
@@ -231,7 +241,8 @@ object NfoScanner {
                 episode = episode,
                 plot = plot,
                 userRating = userRating,
-                aired = aired
+                aired = aired,
+                watchProgress = 0f // Bypassed to native MPVrex engine
             )
         } catch (e: Exception) {
             Log.e("CineHubScanner", "Error processing episode XML: ${nfoFile.name}", e)
@@ -239,7 +250,7 @@ object NfoScanner {
         }
     }
 
-    private fun getXmlDocument(file: File): Document? {
+    fun getXmlDocument(file: File): Document? {
         return try {
             val factory = DocumentBuilderFactory.newInstance()
             val builder = factory.newDocumentBuilder()
@@ -249,7 +260,7 @@ object NfoScanner {
         } catch (e: Exception) { null }
     }
 
-    private fun getTagText(element: Element, tagName: String): String {
+    fun getTagText(element: Element, tagName: String): String {
         val nodeList = element.getElementsByTagName(tagName)
         if (nodeList.length > 0) {
             return nodeList.item(0)?.textContent?.trim() ?: ""
@@ -257,29 +268,22 @@ object NfoScanner {
         return ""
     }
 
-    /**
-     * Advanced Failover Artwork Engine: Extracts local cover files first,
-     * and fallback parses direct high-quality cloud URLs inside <thumb> blocks natively.
-     */
     private fun resolvePosterWithFallback(nfoFile: File, rootElement: Element): String? {
         val baseName = nfoFile.nameWithoutExtension
         val parentDir = nfoFile.parentFile
 
-        // Step 1: Check Local Target Directory Files
         val localCheck = File(parentDir, "$baseName.jpg").takeIf { it.exists() }?.absolutePath
             ?: File(parentDir, "$baseName.png").takeIf { it.exists() }?.absolutePath
             ?: File(parentDir, "poster.jpg").takeIf { it.exists() }?.absolutePath
             ?: File(parentDir, "folder.jpg").takeIf { it.exists() }?.absolutePath
         if (localCheck != null) return localCheck
 
-        // Step 2: Fallback Parse Embedded XML <thumb> tags
         val thumbList = rootElement.getElementsByTagName("thumb")
         for (i in 0 until thumbList.length) {
             val thumbNode = thumbList.item(i)
             if (thumbNode != null && thumbNode.nodeType == Node.ELEMENT_NODE) {
                 val thumbElement = thumbNode as Element
                 val aspect = thumbElement.getAttribute("aspect")
-                // Give absolute priority to standard vertical posters
                 if (aspect == "poster" || aspect.isBlank()) {
                     val url = thumbElement.textContent?.trim() ?: ""
                     if (url.startsWith("http")) return url
@@ -287,7 +291,6 @@ object NfoScanner {
             }
         }
 
-        // Final fallback to any valid url inside thumb blocks
         if (thumbList.length > 0) {
             val firstUrl = thumbList.item(0)?.textContent?.trim() ?: ""
             if (firstUrl.startsWith("http")) return firstUrl
@@ -297,12 +300,11 @@ object NfoScanner {
     }
 
     /**
-     * Extracts deep actor information blocks including avatar portraits from NFO schemas
+     * Standardized Actor Data Parser that extracts raw XML blocks cleanly into type-safe collections
      */
-    fun parseActorsFromNfo(nfoFile: File): List<Pair<String, String>> {
-        val actorsList = mutableListOf<Pair<String, String>>()
+    fun parseActorsFromNfo(doc: Document): List<ActorItem> {
+        val actorsList = mutableListOf<ActorItem>()
         try {
-            val doc = getXmlDocument(nfoFile) ?: return actorsList
             val actorNodes = doc.getElementsByTagName("actor")
             for (i in 0 until actorNodes.length) {
                 val node = actorNodes.item(i)
@@ -311,7 +313,7 @@ object NfoScanner {
                     val name = getTagText(element, "name")
                     val thumb = getTagText(element, "thumb")
                     if (name.isNotBlank()) {
-                        actorsList.add(Pair(name, thumb))
+                        actorsList.add(ActorItem(name = name, thumbUrl = thumb))
                     }
                 }
             }
@@ -320,21 +322,11 @@ object NfoScanner {
     }
 
     /**
-     * Parses content resume state ratios to correctly track video progress layers
+     * Cross-checks directories to return clear matching nodes where specific actor is standard across entities
      */
-    fun parseWatchProgress(nfoFile: File): Float {
-        try {
-            val doc = getXmlDocument(nfoFile) ?: return 0f
-            val resumeNodes = doc.getElementsByTagName("resume")
-            if (resumeNodes.length > 0) {
-                val element = resumeNodes.item(0) as Element
-                val position = getTagText(element, "position").toFloatOrNull() ?: 0f
-                val total = getTagText(element, "total").toFloatOrNull() ?: 0f
-                if (total > 0f) {
-                    return (position / total).coerceIn(0f, 1f)
-                }
-            }
-        } catch (_: Exception) {}
-        return 0f
+    fun getSharedFilmography(actorName: String, movies: List<MovieItem>, shows: List<TvShowItem>): Pair<List<MovieItem>, List<TvShowItem>> {
+        val matchMovies = movies.filter { movie -> movie.actors.any { it.name.equals(actorName, ignoreCase = true) } }
+        val matchShows = shows.filter { show -> show.actors.any { it.name.equals(actorName, ignoreCase = true) } }
+        return Pair(matchMovies, matchShows)
     }
 }
