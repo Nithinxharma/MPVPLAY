@@ -30,13 +30,12 @@ fun CineHubGridCard(
     genre: String,
     rating: Double,
     posterPath: String?,
+    watchProgress: Float = 0f, // Embedded from updated data schemas
     onClick: () -> Unit
 ) {
-    // Interaction source to track touch injection press triggers
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
 
-    // Smooth cinematic scaling animation response on touch click
     val animatedScale by animateFloatAsState(
         targetValue = if (isPressed) 0.95f else 1.0f,
         animationSpec = spring(dampingRatio = 0.6f, stiffness = 300f),
@@ -53,10 +52,10 @@ fun CineHubGridCard(
             }
             .clickable(
                 interactionSource = interactionSource,
-                indication = null, // Removes harsh default ripple to preserve clean scaling aesthetics
+                indication = null,
                 onClick = onClick
             ),
-        shape = RoundedCornerShape(14.dp), // More modern fluid corner curves
+        shape = RoundedCornerShape(14.dp),
         border = BorderStroke(
             width = 1.dp,
             color = MaterialTheme.colorScheme.primary.copy(alpha = if (isPressed) 0.4f else 0.1f)
@@ -70,7 +69,6 @@ fun CineHubGridCard(
     ) {
         Column {
             Box(modifier = Modifier.fillMaxWidth()) {
-                // High definition poster artwork container
                 AsyncImage(
                     model = posterPath ?: android.R.drawable.ic_menu_gallery,
                     contentDescription = title,
@@ -82,7 +80,6 @@ fun CineHubGridCard(
                         .clip(RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp))
                 )
 
-                // Cinematic dark overlay sheet at the bottom of thumbnail to enhance title text pop
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -98,7 +95,6 @@ fun CineHubGridCard(
                         )
                 )
 
-                // Glassmorphic Premium Stream Rating Stamp Indicator Badge
                 if (rating > 0) {
                     Surface(
                         color = Color.Black.copy(alpha = 0.7f),
@@ -128,9 +124,21 @@ fun CineHubGridCard(
                         }
                     }
                 }
+
+                // --- INLINE RESUME PROGRESS INDICATOR BAR ---
+                if (watchProgress > 0f) {
+                    LinearProgressIndicator(
+                        progress = { watchProgress },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(3.5.dp)
+                            .align(Alignment.BottomCenter),
+                        color = MaterialTheme.colorScheme.error, // Streaming premium red bar tint
+                        trackColor = Color.White.copy(alpha = 0.35f)
+                    )
+                }
             }
 
-            // Text descriptive layouts padded tightly matching Material 3 rules
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
