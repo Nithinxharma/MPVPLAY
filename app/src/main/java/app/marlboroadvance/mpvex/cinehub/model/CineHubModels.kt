@@ -3,6 +3,12 @@ package app.marlboroadvance.mpvex.cinehub.model
 import kotlinx.serialization.Serializable
 
 @Serializable
+data class ActorItem(
+    val name: String,
+    val thumbUrl: String
+)
+
+@Serializable
 data class MovieItem(
     val videoFilePath: String,
     val title: String,
@@ -13,7 +19,9 @@ data class MovieItem(
     val genre: String,
     val director: String,
     val premiered: String,
-    val posterPath: String?
+    val posterPath: String?,
+    val watchProgress: Float = 0f,
+    val actors: List<ActorItem> = emptyList()
 )
 
 @Serializable
@@ -25,7 +33,9 @@ data class TvShowItem(
     val genre: String,
     val premiered: String,
     val studio: String,
-    val posterPath: String?
+    val posterPath: String?,
+    val watchProgress: Float = 0f,
+    val actors: List<ActorItem> = emptyList()
 )
 
 @Serializable
@@ -36,5 +46,6 @@ data class EpisodeItem(
     val episode: Int,
     val plot: String,
     val userRating: Double,
-    val aired: String
+    val aired: String,
+    val watchProgress: Float = 0f
 )
