@@ -1,4 +1,4 @@
-package app.marlboroadvance.mpvex.cinehub.ui
+package xyz.mpv.rex.cinehub.ui
 
 import android.content.res.Configuration
 import androidx.compose.animation.core.*
@@ -33,15 +33,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import app.marlboroadvance.mpvex.cinehub.model.MovieItem
-import app.marlboroadvance.mpvex.cinehub.model.TvShowItem
-import app.marlboroadvance.mpvex.cinehub.model.EpisodeItem
-import app.marlboroadvance.mpvex.cinehub.model.ActorItem
-import app.marlboroadvance.mpvex.cinehub.data.NfoScanner
-import app.marlboroadvance.mpvex.cinehub.data.CineCloudRepoClient
-import app.marlboroadvance.mpvex.youtube.data.InvidiousClient
-import app.marlboroadvance.mpvex.youtube.model.YoutubeVideo
-import app.marlboroadvance.mpvex.ui.browser.components.BrowserTopBar
+import xyz.mpv.rex.cinehub.model.MovieItem
+import xyz.mpv.rex.cinehub.model.TvShowItem
+import xyz.mpv.rex.cinehub.model.EpisodeItem
+import xyz.mpv.rex.cinehub.model.ActorItem
+import xyz.mpv.rex.cinehub.data.NfoScanner
+import xyz.mpv.rex.cinehub.data.CineCloudRepoClient
+import xyz.mpv.rex.youtube.data.InvidiousClient
+import xyz.mpv.rex.youtube.model.YoutubeVideo
+import xyz.mpv.rex.ui.browser.components.BrowserTopBar
 import kotlinx.coroutines.launch
 import java.io.File
 

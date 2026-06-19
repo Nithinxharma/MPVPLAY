@@ -1,4 +1,4 @@
-package app.marlboroadvance.mpvex.youtube.model
+package xyz.mpv.rex.youtube.model
 
 import kotlinx.serialization.Serializable
 

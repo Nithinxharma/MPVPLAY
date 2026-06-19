@@ -1,7 +1,7 @@
-package app.marlboroadvance.mpvex.youtube.data
+package xyz.mpv.rex.youtube.data
 
-import app.marlboroadvance.mpvex.youtube.model.YoutubeVideo
-import app.marlboroadvance.mpvex.youtube.model.VideoDataResponse
+import xyz.mpv.rex.youtube.model.YoutubeVideo
+import xyz.mpv.rex.youtube.model.VideoDataResponse
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request

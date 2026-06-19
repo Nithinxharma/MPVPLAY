@@ -1,4 +1,4 @@
-package app.marlboroadvance.mpvex.youtube.ui
+package xyz.mpv.rex.youtube.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -28,9 +28,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import app.marlboroadvance.mpvex.youtube.data.InvidiousClient
-import app.marlboroadvance.mpvex.youtube.model.YoutubeVideo
-import app.marlboroadvance.mpvex.ui.browser.components.BrowserTopBar
+import xyz.mpv.rex.youtube.data.InvidiousClient
+import xyz.mpv.rex.youtube.model.YoutubeVideo
+import xyz.mpv.rex.ui.browser.components.BrowserTopBar
 import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
 

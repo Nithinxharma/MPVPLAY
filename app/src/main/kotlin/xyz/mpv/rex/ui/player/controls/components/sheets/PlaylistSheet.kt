@@ -66,10 +66,10 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.geometry.Offset
-import app.marlboroadvance.mpvex.presentation.components.PlayerSheet
-import app.marlboroadvance.mpvex.preferences.preference.collectAsState
-import app.marlboroadvance.mpvex.ui.theme.spacing
-import app.marlboroadvance.mpvex.cinehub.data.NfoScanner
+import xyz.mpv.rex.presentation.components.PlayerSheet
+import xyz.mpv.rex.preferences.preference.collectAsState
+import xyz.mpv.rex.ui.theme.spacing
+import xyz.mpv.rex.cinehub.data.NfoScanner
 import coil.compose.AsyncImage
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.coroutines.Dispatchers

@@ -1,4 +1,4 @@
-package app.marlboroadvance.mpvex.cinehub.ui
+package xyz.mpv.rex.cinehub.ui
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring

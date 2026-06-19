@@ -1,10 +1,10 @@
-package app.marlboroadvance.mpvex.cinehub.data
+package xyz.mpv.rex.cinehub.data
 
 import android.util.Log
-import app.marlboroadvance.mpvex.cinehub.model.MovieItem
-import app.marlboroadvance.mpvex.cinehub.model.TvShowItem
-import app.marlboroadvance.mpvex.cinehub.model.EpisodeItem
-import app.marlboroadvance.mpvex.cinehub.model.ActorItem
+import xyz.mpv.rex.cinehub.model.MovieItem
+import xyz.mpv.rex.cinehub.model.TvShowItem
+import xyz.mpv.rex.cinehub.model.EpisodeItem
+import xyz.mpv.rex.cinehub.model.ActorItem
 import org.w3c.dom.Document
 import org.w3c.dom.Element
 import org.w3c.dom.Node

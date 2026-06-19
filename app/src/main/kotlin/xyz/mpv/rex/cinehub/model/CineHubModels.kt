@@ -1,4 +1,4 @@
-package app.marlboroadvance.mpvex.cinehub.model
+package xyz.mpv.rex.cinehub.model
 
 import kotlinx.serialization.Serializable
 
