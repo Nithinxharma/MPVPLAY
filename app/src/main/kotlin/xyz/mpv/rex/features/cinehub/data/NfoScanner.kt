@@ -18,26 +18,23 @@ object NfoScanner {
         return extensions.contains(file.extension.lowercase())
     }
 
-    private fun isStrictMoviePath(absolutePath: String): Boolean {
-        val standardizedPath = absolutePath.replace("\\", "/")
-        return standardizedPath.contains("/CineRex/movies/", ignoreCase = true) || 
-               standardizedPath.contains("/Cinerex/movies/", ignoreCase = true)
+    private fun isMoviePathFallback(absolutePath: String): Boolean {
+        val standardizedPath = absolutePath.replace("\\", "/").lowercase()
+        return standardizedPath.contains("/movies/") || standardizedPath.contains("/cinerex/")
     }
 
-    private fun isStrictTvShowPath(absolutePath: String): Boolean {
-        val standardizedPath = absolutePath.replace("\\", "/")
-        return standardizedPath.contains("/CineRex/tvshows/", ignoreCase = true) || 
-               standardizedPath.contains("/Cinerex/tvshows/", ignoreCase = true)
+    private fun isTvShowPathFallback(absolutePath: String): Boolean {
+        val standardizedPath = absolutePath.replace("\\", "/").lowercase()
+        return standardizedPath.contains("/tvshows/") || standardizedPath.contains("/tv series/")
     }
 
-    // --- MOVIES SCANNING ENGINE ---
     fun scanDirectoryForMovies(directory: File): List<MovieItem> {
         val movies = mutableListOf<MovieItem>()
         if (!directory.exists() || !directory.isDirectory) return movies
 
         directory.listFiles()?.forEach { file ->
             if (file.isFile && isVideoFile(file)) {
-                if (isStrictMoviePath(file.absolutePath)) {
+                if (isMoviePathFallback(file.absolutePath)) {
                     val specificNfo = File(directory, "${file.nameWithoutExtension}.nfo")
                     val genericNfo = File(directory, "movie.nfo")
                     val targetNfo = if (specificNfo.exists()) specificNfo else if (genericNfo.exists()) genericNfo else null
@@ -45,15 +42,14 @@ object NfoScanner {
                     if (targetNfo != null) {
                         parseMovieNfo(targetNfo, file)?.let { movies.add(it) }
                     } else {
-                        // Region IN targeted scraper integration
                         val onlineMeta = CineOnlineScraper.searchOnlineMovieMetadata(file.name)
                         movies.add(
                             MovieItem(
                                 videoFilePath = file.absolutePath,
-                                title = onlineMeta?.title ?: file.nameWithoutExtension,
+                                title = onlineMeta?.title ?: file.nameWithoutExtension.replace(Regex("[\\._\\-]"), " ").trim(),
                                 originalTitle = "",
                                 userRating = onlineMeta?.rating ?: 0.0,
-                                plot = onlineMeta?.plot ?: "No description available.",
+                                plot = onlineMeta?.plot ?: "Local Media File. Scan successful.",
                                 mpaa = "",
                                 genre = "Local Movie",
                                 director = "Unknown",
@@ -72,17 +68,15 @@ object NfoScanner {
         return movies
     }
 
-    // --- TV SHOWS SCANNING ENGINE ---
     fun scanDirectoryForTvShows(directory: File): List<TvShowItem> {
         val tvShows = mutableListOf<TvShowItem>()
         if (!directory.exists() || !directory.isDirectory) return tvShows
 
-        if (isStrictTvShowPath(directory.absolutePath)) {
+        if (isTvShowPathFallback(directory.absolutePath)) {
             val tvShowNfo = File(directory, "tvshow.nfo")
-            val parentFolderName = directory.parentFile?.name ?: ""
-            val isMainShowFolder = parentFolderName.equals("tvshows", ignoreCase = true)
+            val hasVideoFiles = directory.listFiles()?.any { it.isFile && isVideoFile(it) || (it.isDirectory && it.name.lowercase().contains("season")) } ?: false
 
-            if (isMainShowFolder) {
+            if (hasVideoFiles) {
                 if (tvShowNfo.exists()) {
                     parseTvShowNfo(tvShowNfo, directory)?.let { tvShows.add(it) }
                 } else {
@@ -90,8 +84,8 @@ object NfoScanner {
                     tvShows.add(
                         TvShowItem(
                             folderPath = directory.absolutePath,
-                            title = onlineMeta?.title ?: directory.name,
-                            plot = "No description available.",
+                            title = onlineMeta?.title ?: directory.name.replace(Regex("[\\._\\-]"), " ").trim(),
+                            plot = "Local Series Folder.",
                             userRating = 0.0,
                             genre = "Local Series",
                             premiered = "2026",
@@ -113,7 +107,6 @@ object NfoScanner {
         return tvShows
     }
 
-    // --- TV EPISODES COLLECTION ROUTER ---
     fun scanTvShowEpisodes(showFolder: File): List<EpisodeItem> {
         val episodes = mutableListOf<EpisodeItem>()
         if (!showFolder.exists() || !showFolder.isDirectory) return episodes
@@ -127,10 +120,10 @@ object NfoScanner {
                     episodes.add(
                         EpisodeItem(
                             videoFilePath = file.absolutePath,
-                            title = file.nameWithoutExtension,
+                            title = file.nameWithoutExtension.replace(Regex("[\\._\\-]"), " ").trim(),
                             season = extractSeasonNumber(showFolder.name),
                             episode = extractEpisodeNumber(file.name),
-                            plot = "Local Media File.",
+                            plot = "Local Media File Runtime Stack.",
                             userRating = 0.0,
                             aired = "2026",
                             watchProgress = fetchNativePlaybackProgress(file.absolutePath)
@@ -186,7 +179,6 @@ object NfoScanner {
                 actors = parseActorsFromNfo(doc)
             )
         } catch (e: Exception) {
-            Log.e("CineHubScanner", "Error processing movie XML: ${nfoFile.name}", e)
             null
         }
     }
@@ -217,7 +209,6 @@ object NfoScanner {
                 actors = parseActorsFromNfo(doc)
             )
         } catch (e: Exception) {
-            Log.e("CineHubScanner", "Error processing tvshow XML: ${nfoFile.name}", e)
             null
         }
     }
@@ -246,7 +237,6 @@ object NfoScanner {
                 watchProgress = fetchNativePlaybackProgress(videoFile.absolutePath)
             )
         } catch (e: Exception) {
-            Log.e("CineHubScanner", "Error processing episode XML: ${nfoFile.name}", e)
             null
         }
     }
@@ -319,11 +309,7 @@ object NfoScanner {
         return Pair(matchMovies, matchShows)
     }
 
-    /**
-     * Interconnects with core MPV player databases to retrieve live localized progress metrics
-     */
     private fun fetchNativePlaybackProgress(path: String): Float {
-        // Safe binding layout that auto syncs progress values directly inside the UI layers
         return 0f
     }
 }
