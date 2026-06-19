@@ -145,13 +145,18 @@ object MainScreen : Screen {
             FolderListScreen.Content()
           }
         )
-        // --- ADDED PREMIUM DECOUPLED PLUG-IN NODE ---
+        // --- FIXED PIPELINE: Hooked intent bridge directly into internal framework nodes safely ---
         add(
           VisibleTab("features", "Features", Icons.Filled.FeaturedPlayList) {
             FeaturesScreen(
               onPlayRequested = { streamUrl, streamTitle ->
-                // Clean interface bridging to player dashboard pipelines natively
-                android.util.Log.d("MainScreen", "Dynamic stream launch requested: $streamUrl - $streamTitle")
+                // Launches the stream natively inside the custom system architecture layout activity
+                val intent = android.content.Intent(context, xyz.mpv.rex.ui.player.PlayerActivity::class.java).apply {
+                    putExtra("playlist", arrayOf(streamUrl))
+                    putExtra("title", streamTitle)
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
               }
             )
           }
