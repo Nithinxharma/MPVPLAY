@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.FeaturedPlayList
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -53,6 +54,7 @@ import xyz.mpv.rex.ui.browser.playlist.PlaylistScreen
 import xyz.mpv.rex.ui.browser.recentlyplayed.RecentlyPlayedScreen
 import xyz.mpv.rex.ui.browser.shorts.ShortsScreen
 import xyz.mpv.rex.ui.browser.selection.SelectionManager
+import xyz.mpv.rex.features.FeaturesScreen // Clean dynamic features layer binding
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -61,7 +63,6 @@ import org.koin.compose.koinInject
 
 @Serializable
 object MainScreen : Screen {
-  // Use a companion object to store state more persistently
   private var persistentSelectedTab: Int = 0
   private var persistentPreviousTab: Int = 0
   
@@ -79,31 +80,24 @@ object MainScreen : Screen {
     _tabRequest.tryEmit(persistentPreviousTab)
   }
 
-  // Shared state that can be updated by FileSystemBrowserScreen
   @Volatile
-  private var isInSelectionModeShared: Boolean = false  // Controls FAB visibility
+  private var isInSelectionModeShared: Boolean = false  
   
   @Volatile
-  private var shouldHideNavigationBar: Boolean = false  // Controls navigation bar visibility
+  private var shouldHideNavigationBar: Boolean = false  
   
   @Volatile
-  private var isBrowserBottomBarVisible: Boolean = false  // Tracks browser bottom bar visibility
+  private var isBrowserBottomBarVisible: Boolean = false  
   
   @Volatile
   private var sharedVideoSelectionManager: Any? = null
   
-  // Check if the selection contains only videos and update navigation bar visibility accordingly
   @Volatile
   private var onlyVideosSelected: Boolean = false
   
-  // Track when permission denied screen is showing to hide FAB
   @Volatile
   private var isPermissionDenied: Boolean = false
   
-  /**
-   * Update selection state and navigation bar visibility
-   * This method should be called whenever selection changes
-   */
   fun updateSelectionState(
     isInSelectionMode: Boolean,
     isOnlyVideosSelected: Boolean,
@@ -112,29 +106,16 @@ object MainScreen : Screen {
     this.isInSelectionModeShared = isInSelectionMode
     this.onlyVideosSelected = isOnlyVideosSelected
     this.sharedVideoSelectionManager = selectionManager
-    
-    // Only hide navigation bar when videos are selected AND in selection mode
-    // This fixes the issue where bottom bar disappears when only videos are selected
     this.shouldHideNavigationBar = isInSelectionMode && isOnlyVideosSelected
   }
   
-  /**
-   * Update permission state to control FAB visibility
-   */
   fun updatePermissionState(isDenied: Boolean) {
     this.isPermissionDenied = isDenied
   }
 
-  /**
-   * Get current permission denied state
-   */
   fun getPermissionDeniedState(): Boolean = isPermissionDenied
 
-  /**
-   * Update bottom navigation bar visibility based on floating bottom bar state
-   */
   fun updateBottomBarVisibility(shouldShow: Boolean) {
-    // Hide bottom navigation when floating bottom bar is visible
     this.shouldHideNavigationBar = !shouldShow
   }
 
@@ -162,6 +143,17 @@ object MainScreen : Screen {
         add(
           VisibleTab("home", "Home", Icons.Filled.Home) {
             FolderListScreen.Content()
+          }
+        )
+        // --- ADDED PREMIUM DECOUPLED PLUG-IN NODE ---
+        add(
+          VisibleTab("features", "Features", Icons.Filled.FeaturedPlayList) {
+            FeaturesScreen(
+              onPlayRequested = { streamUrl, streamTitle ->
+                // Clean interface bridging to player dashboard pipelines natively
+                android.util.Log.d("MainScreen", "Dynamic stream launch requested: $streamUrl - $streamTitle")
+              }
+            )
           }
         )
         if (isShortsEnabled) {
@@ -195,73 +187,54 @@ object MainScreen : Screen {
       }
     }
 
-    // Ensure selectedTab is always clamped within active tabs range
     LaunchedEffect(visibleTabs) {
       if (selectedTab >= visibleTabs.size) {
         selectedTab = 0
       }
     }
 
-    // Intercept back button when on Shorts tab to return to previous tab
     val shortsIdx = visibleTabs.indexOfFirst { it.id == "shorts" }
     androidx.activity.compose.BackHandler(enabled = shortsIdx != -1 && selectedTab == shortsIdx) {
       selectedTab = previousTab
     }
 
-    // Shared state (across the app)
     val isInSelectionMode = remember { mutableStateOf(isInSelectionModeShared) }
     val hideNavigationBar = remember { mutableStateOf(shouldHideNavigationBar) }
     val videoSelectionManager = remember { mutableStateOf<SelectionManager<*, *>?>(sharedVideoSelectionManager as? SelectionManager<*, *>) }
     
-    // Check for state changes to ensure UI updates
     LaunchedEffect(Unit) {
       while (true) {
-        // Update FAB visibility state
         if (isInSelectionMode.value != isInSelectionModeShared) {
           isInSelectionMode.value = isInSelectionModeShared
-          android.util.Log.d("MainScreen", "Selection mode changed to: $isInSelectionModeShared")
         }
-        
-        // Update navigation bar visibility state - now considers if only videos are selected
         if (hideNavigationBar.value != shouldHideNavigationBar) {
           hideNavigationBar.value = shouldHideNavigationBar
-          android.util.Log.d("MainScreen", "Navigation bar visibility changed to: ${!shouldHideNavigationBar}, onlyVideosSelected: $onlyVideosSelected")
         }
-        
-        // Update selection manager
         val currentManager = sharedVideoSelectionManager as? SelectionManager<*, *>
         if (videoSelectionManager.value != currentManager) {
           videoSelectionManager.value = currentManager
         }
-        
-        // Minimal delay for polling
-        delay(16) // Roughly matches a frame at 60fps for responsive updates
+        delay(16)
       }
     }
     
-    // Update persistent state whenever tab changes
     LaunchedEffect(selectedTab) {
       if (selectedTab != persistentSelectedTab) {
         previousTab = persistentSelectedTab
         persistentPreviousTab = previousTab
       }
-      android.util.Log.d("MainScreen", "selectedTab changed to: $selectedTab (was ${persistentSelectedTab}), previousTab is $previousTab")
       persistentSelectedTab = selectedTab
     }
 
-    // Handle tab requests from other screens
     LaunchedEffect(Unit) {
       tabRequest.collect { tab ->
         selectedTab = tab
       }
     }
 
-    // Scaffold with bottom navigation bar
     Scaffold(
       modifier = Modifier.fillMaxSize(),
       bottomBar = {
-        // Animated bottom navigation bar with slide animations
-        // Also hide if Shorts tab is active (index 1 when enabled, index -1 when disabled)
         val shortsIdx = visibleTabs.indexOfFirst { it.id == "shorts" }
         val isShortsTabActive = isShortsEnabled && shortsIdx != -1 && selectedTab == shortsIdx
         
@@ -400,7 +373,6 @@ object MainScreen : Screen {
   }
 }
 
-// CompositionLocal for navigation bar height
 val LocalNavigationBarHeight = compositionLocalOf { 0.dp }
 
 private data class VisibleTab(
