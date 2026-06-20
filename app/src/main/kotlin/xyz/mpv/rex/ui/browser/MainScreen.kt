@@ -65,7 +65,7 @@ import org.koin.compose.koinInject
 object MainScreen : Screen {
   private var persistentSelectedTab: Int = 0
   private var persistentPreviousTab: Int = 0
-  
+
   private val _tabRequest = MutableSharedFlow<Int>(extraBufferCapacity = 1)
   val tabRequest = _tabRequest.asSharedFlow()
 
@@ -75,29 +75,29 @@ object MainScreen : Screen {
   fun requestTab(tab: Int) {
     _tabRequest.tryEmit(tab)
   }
-  
+
   fun requestPreviousTab() {
     _tabRequest.tryEmit(persistentPreviousTab)
   }
 
   @Volatile
   private var isInSelectionModeShared: Boolean = false  
-  
+
   @Volatile
   private var shouldHideNavigationBar: Boolean = false  
-  
+
   @Volatile
   private var isBrowserBottomBarVisible: Boolean = false  
-  
+
   @Volatile
   private var sharedVideoSelectionManager: Any? = null
-  
+
   @Volatile
   private var onlyVideosSelected: Boolean = false
-  
+
   @Volatile
   private var isPermissionDenied: Boolean = false
-  
+
   fun updateSelectionState(
     isInSelectionMode: Boolean,
     isOnlyVideosSelected: Boolean,
@@ -108,7 +108,7 @@ object MainScreen : Screen {
     this.sharedVideoSelectionManager = selectionManager
     this.shouldHideNavigationBar = isInSelectionMode && isOnlyVideosSelected
   }
-  
+
   fun updatePermissionState(isDenied: Boolean) {
     this.isPermissionDenied = isDenied
   }
@@ -125,7 +125,7 @@ object MainScreen : Screen {
     var selectedTab by remember {
       mutableIntStateOf(persistentSelectedTab)
     }
-    
+
     var previousTab by remember {
       mutableIntStateOf(persistentPreviousTab)
     }
@@ -145,12 +145,12 @@ object MainScreen : Screen {
             FolderListScreen.Content()
           }
         )
-        // --- FIXED PIPELINE WIRING: Replaced old Features tab with CineMine Core Matrix Node ---
+        // --- FIXED PIPELINE WIRING: CineMine Screen Canvas Dynamic Binding Node ---
         add(
           VisibleTab("cinemine", "CineMine", Icons.Filled.FeaturedPlayList) {
             CineMineScreen(
               onPlayRequested = { streamUrl, streamTitle ->
-                // Direct high-performance interface navigation intent mapping for active local media playback
+                // Direct high-performance interface navigation intent mapping for active media playback
                 val intent = android.content.Intent(context, xyz.mpv.rex.ui.player.PlayerActivity::class.java).apply {
                     putExtra("playlist", arrayOf(streamUrl))
                     putExtra("title", streamTitle)
@@ -206,7 +206,7 @@ object MainScreen : Screen {
     val isInSelectionMode = remember { mutableStateOf(isInSelectionModeShared) }
     val hideNavigationBar = remember { mutableStateOf(shouldHideNavigationBar) }
     val videoSelectionManager = remember { mutableStateOf<SelectionManager<*, *>?>(sharedVideoSelectionManager as? SelectionManager<*, *>) }
-    
+
     LaunchedEffect(Unit) {
       while (true) {
         if (isInSelectionMode.value != isInSelectionModeShared) {
@@ -222,7 +222,7 @@ object MainScreen : Screen {
         delay(16)
       }
     }
-    
+
     LaunchedEffect(selectedTab) {
       if (selectedTab != persistentSelectedTab) {
         previousTab = persistentSelectedTab
@@ -242,7 +242,7 @@ object MainScreen : Screen {
       bottomBar = {
         val shortsIdx = visibleTabs.indexOfFirst { it.id == "shorts" }
         val isShortsTabActive = isShortsEnabled && shortsIdx != -1 && selectedTab == shortsIdx
-        
+
         AnimatedVisibility(
           visible = !hideNavigationBar.value && !isShortsTabActive && visibleTabs.size > 1,
           enter = slideInVertically(
@@ -306,7 +306,7 @@ object MainScreen : Screen {
           transitionSpec = {
             val slideDistance = with(density) { 48.dp.roundToPx() }
             val animationDuration = 250
-            
+
             if (targetState > initialState) {
               (slideInHorizontally(
                 animationSpec = tween(
@@ -362,7 +362,7 @@ object MainScreen : Screen {
           val shortsIdx = visibleTabs.indexOfFirst { it.id == "shorts" }
           val isShortsTabActive = isShortsEnabled && shortsIdx != -1 && selectedTab == shortsIdx
           val isNavBarVisible = !hideNavigationBar.value && !isShortsTabActive && visibleTabs.size > 1
-          
+
           CompositionLocalProvider(
             LocalNavigationBarHeight provides if (isNavBarVisible) fabBottomPadding else 0.dp
           ) {
