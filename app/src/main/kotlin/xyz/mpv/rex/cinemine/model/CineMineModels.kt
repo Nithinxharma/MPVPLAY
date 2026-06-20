@@ -7,8 +7,6 @@ enum class MineTab(val label: String) {
     CINEHUB_ONLINE("Cloud Repo")
 }
 
-// ================= LOCAL CORE DATACLASSES TO FIX COMPILER ERRORS =================
-
 data class MovieItem(
     val videoFilePath: String,
     val title: String,
@@ -67,12 +65,3 @@ data class YoutubeVideo(
 data class YoutubeThumbnail(
     val url: String
 )
-
-// ================= SEALED FEED CHANNELS =================
-
-sealed class CineMineFeedItem {
-    data class LocalMovie(val movie: MovieItem) : CineMineFeedItem()
-    data class LocalTvShow(val tvShow: TvShowItem) : CineMineFeedItem()
-    data class TubeStream(val video: YoutubeVideo) : CineMineFeedItem()
-    data class CloudStream(val onlineMovie: MovieItem) : CineMineFeedItem()
-}
