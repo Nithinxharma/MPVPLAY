@@ -8,7 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.PlayArrow
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -117,7 +117,6 @@ fun MovieItemCard(
 
 /**
  * 📺 2. TV Show Item Card (Handles Local and Cloud Series Groups)
- * UPDATE: Aligned signature layout property mapping directly to model types context variables
  */
 @Composable
 fun TvShowItemCard(
@@ -271,8 +270,8 @@ fun ArtistInfoCard(
 }
 
 /**
- * 5. TV Show Episode List Item Card
- * UPDATE: Swapped out unresolved abstract standard reference identifier vector with fully qualified AutoMirrored PlayArrow
+ * 🎞️ 5. TV Show Episode List Item Card
+ * FIXED: Swapped out AutoMirrored layout call directly with safe, standard Icons.Default.PlayArrow
  */
 @Composable
 fun EpisodeItemRow(
@@ -322,7 +321,7 @@ fun EpisodeItemRow(
                 modifier = Modifier.size(36.dp)
             ) {
                 Icon(
-                    imageVector = Icons.AutoMirrored.Filled.PlayArrow,
+                    imageVector = Icons.Default.PlayArrow,
                     contentDescription = "Play Episode",
                     modifier = Modifier.size(20.dp)
                 )
