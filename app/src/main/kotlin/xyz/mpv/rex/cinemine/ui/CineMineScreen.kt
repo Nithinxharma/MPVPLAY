@@ -5,7 +5,6 @@ import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -27,15 +26,9 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import xyz.mpv.rex.cinemine.model.MineTab
-import xyz.mpv.rex.cinemine.model.MovieItem
-import xyz.mpv.rex.cinemine.model.TvShowItem
-import xyz.mpv.rex.cinemine.model.YoutubeVideo
+import xyz.mpv.rex.cinemine.model.*
 import xyz.mpv.rex.cinemine.viewmodel.CineMineViewModel
-import xyz.mpv.rex.cinemine.ui.components.MovieItemCard
-import xyz.mpv.rex.cinemine.ui.components.TvShowItemCard
-import xyz.mpv.rex.cinemine.ui.components.YoutubeVideoCard
-import xyz.mpv.rex.cinemine.ui.components.TvShowDetailSheet
+import xyz.mpv.rex.cinemine.ui.components.*
 import xyz.mpv.rex.cinemine.data.CineMineRepo
 import xyz.mpv.rex.cinemine.data.CineMineStreamResolver
 import kotlinx.coroutines.launch
@@ -87,11 +80,7 @@ fun CineMineScreen(
             .fillMaxSize()
             .windowInsetsPadding(WindowInsets.statusBars),
         topBar = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.background.copy(alpha = 0.85f))
-            ) {
+            Column(modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background.copy(alpha = 0.85f))) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -102,62 +91,32 @@ fun CineMineScreen(
                 ) {
                     OutlinedTextField(
                         value = viewModel.searchQuery,
-                        onValueChange = { 
-                            viewModel.updateSearchAndFilter(it, rawMovies, rawShows, rawTubeVideos, rawCloudMovies) 
-                        },
-                        placeholder = { 
-                            Text(
-                                "Search Movies, TV Shows or Streams globally...", 
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                                fontSize = 14.sp
-                            ) 
-                        },
+                        onValueChange = { viewModel.updateSearchAndFilter(it, rawMovies, rawShows, rawTubeVideos, rawCloudMovies) },
+                        placeholder = { Text("Search Movies, TV Shows or Streams globally...", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), fontSize = 14.sp) },
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
                         modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Color.Transparent,
-                            unfocusedBorderColor = Color.Transparent
-                        ),
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color.Transparent, unfocusedBorderColor = Color.Transparent),
                         singleLine = true
                     )
                 }
 
-                ScrollableTabRow(
-                    selectedTabIndex = viewModel.activeTab.ordinal,
-                    containerColor = Color.Transparent,
-                    edgePadding = 16.dp,
-                    divider = {}
-                ) {
+                ScrollableTabRow(selectedTabIndex = viewModel.activeTab.ordinal, containerColor = Color.Transparent, edgePadding = 16.dp, divider = {}) {
                     MineTab.values().forEach { tab ->
                         val isSelected = viewModel.activeTab == tab
                         Tab(
                             selected = isSelected,
                             onClick = { viewModel.activeTab = tab },
-                            text = {
-                                Text(
-                                    text = tab.label,
-                                    fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
-                                    fontSize = 13.sp,
-                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                            text = { Text(text = tab.label, fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold, fontSize = 13.sp, color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }
                         )
                     }
                 }
             }
         }
     ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-        ) {
+        Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
             when (viewModel.activeTab) {
                 MineTab.UNIFIED -> {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(bottom = 24.dp, top = 4.dp)
-                    ) {
+                    LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp, top = 4.dp)) {
                         if (viewModel.filteredLocalMovies.isNotEmpty()) {
                             item {
                                 Text("Local Movies Collection", fontWeight = FontWeight.Black, fontSize = 16.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 8.dp))
@@ -226,9 +185,7 @@ fun CineMineScreen(
                 MineTab.CINETUBE -> {
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(if (configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) 3 else 1),
-                        contentPadding = PaddingValues(12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        contentPadding = PaddingValues(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp),
                         modifier = Modifier.fillMaxSize()
                     ) {
                         items(viewModel.filteredTubeVideos) { video ->
@@ -244,10 +201,7 @@ fun CineMineScreen(
 
                 MineTab.CINEHUB_LOCAL -> {
                     LazyVerticalGrid(
-                        columns = GridCells.Fixed(gridColumnCount),
-                        contentPadding = PaddingValues(12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        columns = GridCells.Fixed(gridColumnCount), contentPadding = PaddingValues(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
                         modifier = Modifier.fillMaxSize()
                     ) {
                         items(viewModel.filteredLocalMovies) { movie ->
@@ -263,10 +217,7 @@ fun CineMineScreen(
 
                 MineTab.CINEHUB_ONLINE -> {
                     LazyVerticalGrid(
-                        columns = GridCells.Fixed(gridColumnCount),
-                        contentPadding = PaddingValues(12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        columns = GridCells.Fixed(gridColumnCount), contentPadding = PaddingValues(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
                         modifier = Modifier.fillMaxSize()
                     ) {
                         items(viewModel.filteredOnlineCloud) { cloudMovie ->
@@ -282,21 +233,11 @@ fun CineMineScreen(
             }
 
             viewModel.selectedTvShowForSheet?.let { activeShow ->
-                TvShowDetailSheet(
-                    show = activeShow,
-                    onDismiss = { viewModel.closeTvShowDetails() },
-                    onPlayRequested = onPlayRequested
-                )
+                TvShowDetailSheet(show = activeShow, onDismiss = { viewModel.closeTvShowDetails() }, onPlayRequested = onPlayRequested)
             }
 
             if (isFetchingData) {
-                CircularProgressIndicator(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(24.dp)
-                        .size(28.dp),
-                    strokeWidth = 2.5.dp
-                )
+                CircularProgressIndicator(modifier = Modifier.align(Alignment.BottomCenter).padding(24.dp).size(28.dp), strokeWidth = 2.5.dp)
             }
         }
     }
