@@ -1,3 +1,4 @@
+
 package app.marlboroadvance.mpvex.cinetv.ui
 
 import androidx.compose.animation.*
@@ -54,7 +55,8 @@ fun LiveTvTabScreen(
         userAuthed = JioTvRepo.isUserLoggedIn()
         
         isLoading = true
-        allChannels = JioTvRepo.fetchLiveChannels()
+        // FIXED: Now mapping dynamic objects directly from channels.json data layout structure safely
+        allChannels = JioTvRepo.fetchLiveChannelsFromAssets(context)
         isLoading = false
     }
 
@@ -115,10 +117,11 @@ fun LiveTvTabScreen(
                         CircularProgressIndicator(strokeWidth = 2.5.dp, modifier = Modifier.size(32.dp))
                     }
                 } else {
+                    // FIXED: Aligned content padding framework variables explicitly to pass strict compose validation checks
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(1),
                         modifier = Modifier.fillMaxWidth().weight(1f),
-                        contentPadding = PaddingValues(horizontal = 14.dp, bottom = 16.dp),
+                        contentPadding = PaddingValues(start = 14.dp, end = 14.dp, bottom = 16.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         items(filteredChannels) { channel ->
