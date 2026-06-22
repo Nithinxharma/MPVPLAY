@@ -50,6 +50,7 @@ fun LiveTvTabScreen(
     var selectedCategory by remember { mutableStateOf("All") }
     var isLoading by remember { mutableStateOf(true) }
 
+    // Trigger Scanner & Fetch Data
     LaunchedEffect(Unit) {
         JioTvRepo.initTokens(context)
         userAuthed = JioTvRepo.isUserLoggedIn()
@@ -58,14 +59,15 @@ fun LiveTvTabScreen(
         allChannels = JioTvRepo.fetchLiveChannelsFromAssets(context)
         isLoading = false
 
-        // Parallel background IO call for triggering the offline storage media scanner automatically
+        // Automatic NFO Scanner trigger as per CineHub activity launch logic
         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
             val rootStorageDir = android.os.Environment.getExternalStorageDirectory()
             try {
                 NfoScanner.scanDirectoryForMovies(rootStorageDir)
                 NfoScanner.scanDirectoryForTvShows(rootStorageDir)
+                android.util.Log.d("LiveTvScanner", "CineHub background scan triggered successfully.")
             } catch (e: Exception) {
-                android.util.Log.w("LiveTvTabScreen", "CineHub auto scanning loop bypassed silently.", e)
+                android.util.Log.e("LiveTvScanner", "Scan loop interrupted.", e)
             }
         }
     }
@@ -128,7 +130,7 @@ fun LiveTvTabScreen(
                     }
                 } else if (filteredChannels.isEmpty()) {
                     Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                        Text("No live stations found in this filter.", fontSize = 13.sp, color = Color.Gray)
+                        Text("No live channels match current selection.", color = Color.Gray)
                     }
                 } else {
                     LazyVerticalGrid(
@@ -167,68 +169,33 @@ fun LiveTvTabScreen(
                             Icon(Icons.Default.Lock, contentDescription = null, tint = Color.Green, modifier = Modifier.size(48.dp))
                             Spacer(modifier = Modifier.height(12.dp))
                             Text("Authenticated Session Secure", fontWeight = FontWeight.Black, fontSize = 16.sp)
-                            Text("SSO profile handshake successfully injected inside proxy.", fontSize = 11.sp, color = Color.Gray)
-                            Spacer(modifier = Modifier.height(20.dp))
                             Button(
                                 onClick = { JioTvRepo.logout(context); userAuthed = false },
                                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                            ) {
-                                Text("Revoke Login Session")
-                            }
+                            ) { Text("Revoke Login Session") }
                         } else {
                             var mobile by remember { mutableStateOf("") }
                             var otpCode by remember { mutableStateOf("") }
                             var isOtpSent by remember { mutableStateOf(false) }
-                            var msgStatus by remember { mutableStateOf("Enter Jio Registered Mobile Number") }
-
-                            Text("JioTV Proxy Gateway", fontWeight = FontWeight.Black, fontSize = 18.sp)
-                            Spacer(modifier = Modifier.height(16.dp))
-
-                            OutlinedTextField(
-                                value = mobile, onValueChange = { mobile = it },
-                                label = { Text("Mobile Number") }, modifier = Modifier.fillMaxWidth(),
-                                singleLine = true
-                            )
-
+                            
+                            OutlinedTextField(value = mobile, onValueChange = { mobile = it }, label = { Text("Mobile Number") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                             if (isOtpSent) {
                                 Spacer(modifier = Modifier.height(10.dp))
-                                OutlinedTextField(
-                                    value = otpCode, onValueChange = { otpCode = it },
-                                    label = { Text("Enter OTP Code") }, modifier = Modifier.fillMaxWidth(),
-                                    singleLine = true
-                                )
+                                OutlinedTextField(value = otpCode, onValueChange = { otpCode = it }, label = { Text("Enter OTP Code") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                             }
-
                             Spacer(modifier = Modifier.height(16.dp))
-                            Text(msgStatus, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                            Spacer(modifier = Modifier.height(16.dp))
-
                             Button(
                                 modifier = Modifier.fillMaxWidth(),
                                 onClick = {
                                     scope.launch {
                                         if (!isOtpSent) {
-                                            msgStatus = "Requesting OTP..."
-                                            if (JioTvRepo.requestOtp(mobile)) {
-                                                isOtpSent = true
-                                                msgStatus = "OTP Sent Successfully!"
-                                            } else {
-                                                msgStatus = "Failed challenging number node. Try again."
-                                            }
+                                            if (JioTvRepo.requestOtp(mobile)) isOtpSent = true
                                         } else {
-                                            msgStatus = "Verifying Credentials..."
-                                            if (JioTvRepo.verifyOtp(context, mobile, otpCode)) {
-                                                userAuthed = true
-                                                msgStatus = "Session Established!"
-                                            } else {
-                                                msgStatus = "Invalid OTP check verification token."
-                                            }
+                                            if (JioTvRepo.verifyOtp(context, mobile, otpCode)) userAuthed = true
                                         }
                                     }
                                 }
-                            ) {
-                                Text(if (!isOtpSent) "Send OTP Challenge" else "Verify & Inject Token")
-                            }
+                            ) { Text(if (!isOtpSent) "Send OTP Challenge" else "Verify Token") }
                         }
                     }
                 }
@@ -238,10 +205,7 @@ fun LiveTvTabScreen(
 }
 
 @Composable
-fun LiveChannelRowItem(
-    channel: LiveChannelItem,
-    onClick: () -> Unit
-) {
+fun LiveChannelRowItem(channel: LiveChannelItem, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -250,38 +214,19 @@ fun LiveChannelRowItem(
             .border(BorderStroke(0.5.dp, Color.White.copy(alpha = 0.08f)), RoundedCornerShape(16.dp))
             .clickable { onClick() }
     ) {
-        Row(
-            modifier = Modifier.padding(12.dp).fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        Row(modifier = Modifier.padding(12.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             AsyncImage(
-                model = channel.logoUrl, contentDescription = channel.title,
-                modifier = Modifier
-                    .size(52.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(Color.White)
-                    .padding(4.dp),
+                model = channel.logoUrl, 
+                contentDescription = channel.title,
+                modifier = Modifier.size(52.dp).clip(RoundedCornerShape(10.dp)).background(Color.White).padding(4.dp),
                 contentScale = ContentScale.Fit
             )
             Spacer(modifier = Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(channel.title, fontSize = 14.sp, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Surface(color = Color.Red.copy(alpha = 0.15f), shape = RoundedCornerShape(4.dp)) {
-                        Text("LIVE", color = Color.Red, fontSize = 8.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
-                    }
-                }
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(channel.currentProgram, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(channel.programTime, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+                Text(channel.title, fontSize = 14.sp, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
+                Text(channel.currentProgram, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.primary, maxLines = 1)
             }
-            Spacer(modifier = Modifier.width(8.dp))
-            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f), modifier = Modifier.size(32.dp)) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(imageVector = Icons.Default.PlayArrow, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(18.dp))
-                }
-            }
+            Icon(Icons.Default.PlayArrow, contentDescription = null)
         }
     }
 }
