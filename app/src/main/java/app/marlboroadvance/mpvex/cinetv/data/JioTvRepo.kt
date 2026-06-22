@@ -1,6 +1,7 @@
 package app.marlboroadvance.mpvex.cinetv.data
 
 import android.content.Context
+import android.util.Base64
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -24,8 +25,9 @@ object JioTvRepo {
     @Volatile private var cachedToken: String = ""
     @Volatile private var cachedCrm: String = ""
 
-    private const val USER_AGENT = "JioTV Android App Framework Production Engine"
-    private const val API_KEY = "l7xx76x34x66x34x65x32x34x62x34x65x34x32"
+    // Updated to match PHP Repo structure
+    private const val BASE_URL = "https://jiotvapi.media.jio.com/userservice/apis/v1/loginotp"
+    private const val USER_AGENT = "okhttp/3.14.9"
 
     fun initTokens(context: Context) {
         val prefs = context.getSharedPreferences("JioTvAuthPrefs", Context.MODE_PRIVATE)
@@ -35,42 +37,56 @@ object JioTvRepo {
 
     fun isUserLoggedIn(): Boolean = cachedToken.isNotBlank()
 
+    // FIXED: Base64 encoding + header simulation as per jitendraunatti/login.php
     suspend fun requestOtp(mobileNumber: String): Boolean = withContext(Dispatchers.IO) {
         try {
-            val url = "https://api.jio.com/token/v3/api/common/generateOTP"
-            val jsonPayload = buildJsonObject {
-                put("identifier", mobileNumber)
-                put("otpType", "sms")
-                put("appName", "RJIL_JioTV")
-            }.toString()
+            val fullPhone = if (mobileNumber.startsWith("+91")) mobileNumber else "+91$mobileNumber"
+            val encodedPhone = Base64.encodeToString(fullPhone.toByteArray(), Base64.NO_WRAP)
+            
+            val jsonPayload = buildJsonObject { put("number", encodedPhone) }.toString()
 
-            val request = Request.Builder().url(url)
+            val request = Request.Builder()
+                .url("$BASE_URL/send")
                 .post(jsonPayload.toRequestBody("application/json".toMediaType()))
+                .addHeader("appname", "RJIL_JioTV")
+                .addHeader("os", "android")
+                .addHeader("devicetype", "phone")
                 .addHeader("User-Agent", USER_AGENT)
-                .addHeader("X-API-Key", API_KEY)
                 .build()
 
             client.newCall(request).execute().use { response ->
-                return@withContext response.isSuccessful
+                return@withContext response.code == 204 || response.isSuccessful
             }
         } catch (e: Exception) {
             return@withContext false
         }
     }
 
+    // FIXED: Handshake with device simulation
     suspend fun verifyOtp(context: Context, mobileNumber: String, otp: String): Boolean = withContext(Dispatchers.IO) {
         try {
-            val url = "https://api.jio.com/token/v3/api/common/validateOTP"
+            val fullPhone = if (mobileNumber.startsWith("+91")) mobileNumber else "+91$mobileNumber"
+            val encodedPhone = Base64.encodeToString(fullPhone.toByteArray(), Base64.NO_WRAP)
+            
             val jsonPayload = buildJsonObject {
-                put("identifier", mobileNumber)
+                put("number", encodedPhone)
                 put("otp", otp)
-                put("appName", "RJIL_JioTV")
+                put("deviceInfo", buildJsonObject {
+                    put("consumptionDeviceName", "RMX1945")
+                    put("info", buildJsonObject {
+                        put("type", "android")
+                        put("androidId", "android_id_sync_99")
+                    })
+                })
             }.toString()
 
-            val request = Request.Builder().url(url)
+            val request = Request.Builder()
+                .url("$BASE_URL/verify")
                 .post(jsonPayload.toRequestBody("application/json".toMediaType()))
+                .addHeader("appname", "RJIL_JioTV")
+                .addHeader("os", "android")
+                .addHeader("devicetype", "phone")
                 .addHeader("User-Agent", USER_AGENT)
-                .addHeader("X-API-Key", API_KEY)
                 .build()
 
             client.newCall(request).execute().use { response ->
@@ -79,21 +95,17 @@ object JioTvRepo {
                     val parsed = json.parseToJsonElement(body).jsonObject
                     
                     val ssoToken = parsed["ssoToken"]?.jsonPrimitive?.content ?: ""
-                    val crmToken = parsed["userCrmId"]?.jsonPrimitive?.content ?: "crm_pass_2026"
-
+                    // Match ssoToken structure
                     if (ssoToken.isNotBlank()) {
                         cachedToken = ssoToken
-                        cachedCrm = crmToken
-                        
                         context.getSharedPreferences("JioTvAuthPrefs", Context.MODE_PRIVATE).edit()
                             .putString("sso_token", ssoToken)
-                            .putString("crm_token", crmToken)
                             .apply()
                         return@withContext true
                     }
                 }
+                return@withContext false
             }
-            return@withContext false
         } catch (e: Exception) {
             return@withContext false
         }
@@ -101,49 +113,33 @@ object JioTvRepo {
 
     suspend fun fetchLiveChannelsFromAssets(context: Context): List<LiveChannelItem> = withContext(Dispatchers.IO) {
         val list = mutableListOf<LiveChannelItem>()
+        // Note: Ideally switch to fetchLiveChannelsFromApi(context) using the PHP Logic if assets get outdated
+        // For now, keeping your assets parser
         try {
             val inputStream: InputStream = context.assets.open("channels.json")
             val jsonString = inputStream.bufferedReader().use { it.readText() }
             val rootObject = json.parseToJsonElement(jsonString).jsonObject
-
             for ((channelId, channelElement) in rootObject) {
                 val channelNode = channelElement.jsonObject
-                
                 val name = channelNode["name"]?.jsonPrimitive?.content ?: ""
-                val category = channelNode["genre"]?.jsonPrimitive?.content ?: "News"
+                val category = channelNode["genre"]?.jsonPrimitive?.content ?: "Entertainment"
                 val language = channelNode["language"]?.jsonPrimitive?.content ?: "Hindi"
+                val logoUrl = "https://jiotvimages.cdn.jio.com/dare_images/images/" + (channelNode["logo"]?.jsonPrimitive?.content ?: "$channelId.png")
                 
-                val defaultLogo = channelNode["default_logo"]?.jsonPrimitive?.content ?: "$channelId.png"
-                val logoUrl = "https://jiotvimages.media.jio.com/jiotv_logos/$defaultLogo"
-
-                if (name.isNotBlank()) {
-                    list.add(
-                        LiveChannelItem(
-                            channelId = channelId,
-                            title = name,
-                            category = category,
-                            language = language,
-                            logoUrl = logoUrl,
-                            streamUrlHash = "jiotv_live:$channelId"
-                        )
-                    )
-                }
+                list.add(LiveChannelItem(channelId, name, category, language, logoUrl, "jiotv_live:$channelId"))
             }
-        } catch (e: Exception) {
-            Log.e("JioTvRepo", "Error parsing channels", e)
-        }
+        } catch (e: Exception) { Log.e("JioTvRepo", "Failed", e) }
         return@withContext list
     }
 
     suspend fun getResolvedLiveUrl(channelId: String): String = withContext(Dispatchers.IO) {
+        // Using LB Cookie logic
         val token = if (cachedToken.isBlank()) "mock_token" else cachedToken
-        val crm = if (cachedCrm.isBlank()) "mock_crm" else cachedCrm
-        return@withContext "https://jiotv.live.cdn.jio.com/$channelId/${channelId}_hd.m3u8?ver=2026&ssoToken=$token&crm=$crm&jioid=mpvex_stream"
+        return@withContext "https://jiotv.live.cdn.jio.com/$channelId/${channelId}_hd.m3u8?ver=2026&ssoToken=$token&lbcookie=1"
     }
 
     fun logout(context: Context) {
         cachedToken = ""
-        cachedCrm = ""
         context.getSharedPreferences("JioTvAuthPrefs", Context.MODE_PRIVATE).edit().clear().apply()
     }
 }
