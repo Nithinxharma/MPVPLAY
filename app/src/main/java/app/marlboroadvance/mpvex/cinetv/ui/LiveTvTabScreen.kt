@@ -1,4 +1,3 @@
-
 package app.marlboroadvance.mpvex.cinetv.ui
 
 import androidx.compose.animation.*
@@ -34,6 +33,7 @@ import kotlinx.coroutines.launch
 import app.marlboroadvance.mpvex.cinetv.data.JioTvRepo
 import app.marlboroadvance.mpvex.cinetv.model.LiveChannelItem
 import app.marlboroadvance.mpvex.cinetv.model.LiveTab
+import app.marlboroadvance.mpvex.cinehub.data.NfoScanner
 
 @Composable
 fun LiveTvTabScreen(
@@ -55,9 +55,19 @@ fun LiveTvTabScreen(
         userAuthed = JioTvRepo.isUserLoggedIn()
         
         isLoading = true
-        // FIXED: Now mapping dynamic objects directly from channels.json data layout structure safely
         allChannels = JioTvRepo.fetchLiveChannelsFromAssets(context)
         isLoading = false
+
+        // Parallel background IO call for triggering the offline storage media scanner automatically
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val rootStorageDir = android.os.Environment.getExternalStorageDirectory()
+            try {
+                NfoScanner.scanDirectoryForMovies(rootStorageDir)
+                NfoScanner.scanDirectoryForTvShows(rootStorageDir)
+            } catch (e: Exception) {
+                android.util.Log.w("LiveTvTabScreen", "CineHub auto scanning loop bypassed silently.", e)
+            }
+        }
     }
 
     val computedCategories = remember(allChannels) {
@@ -117,7 +127,6 @@ fun LiveTvTabScreen(
                         CircularProgressIndicator(strokeWidth = 2.5.dp, modifier = Modifier.size(32.dp))
                     }
                 } else {
-                    // FIXED: Aligned content padding framework variables explicitly to pass strict compose validation checks
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(1),
                         modifier = Modifier.fillMaxWidth().weight(1f),
@@ -246,7 +255,7 @@ fun LiveChannelRowItem(
                 modifier = Modifier
                     .size(52.dp)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(Color.White.copy(alpha = 0.9f))
+                    .background(Color.White)
                     .padding(4.dp),
                 contentScale = ContentScale.Fit
             )
