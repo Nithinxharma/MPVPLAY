@@ -22,6 +22,8 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.Tv
+import androidx.compose.material.icons.filled.OndemandVideo
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -45,6 +47,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.marlboroadvance.mpvex.preferences.BrowserPreferences
 import app.marlboroadvance.mpvex.preferences.preference.collectAsState
 import app.marlboroadvance.mpvex.presentation.Screen
@@ -59,6 +62,7 @@ import app.marlboroadvance.mpvex.cinehub.data.NfoScanner
 import app.marlboroadvance.mpvex.cinehub.model.MovieItem
 import app.marlboroadvance.mpvex.cinehub.model.TvShowItem
 import app.marlboroadvance.mpvex.ui.player.PlayerActivity
+import app.marlboroadvance.mpvex.cinetv.ui.LiveTvTabScreen // Injected new standalone module package
 import android.content.Intent
 import android.net.Uri
 import java.io.File
@@ -121,14 +125,14 @@ object MainScreen : Screen {
     val enableTabPlaylists by browserPreferences.enableTabPlaylists.collectAsState()
     val enableTabNetwork by browserPreferences.enableTabNetwork.collectAsState()
     
-    // Live collecting toggle state value from data layer preferences configuration mapping
+    // Live collecting toggle states configuration values from shared data preference mapping layer
     val enableCineHub by browserPreferences.enableCineHub.collectAsState()
+    val enableCineTube by browserPreferences.enableCineTube.collectAsState()
+    val enableCineTv by browserPreferences.enableCineTv.collectAsState()
 
-    // Persistent storage states to keep metadata memory footprints minimal and instant
     var cachedMovies by remember { mutableStateOf<List<MovieItem>>(emptyList()) }
     var cachedTvShows by remember { mutableStateOf<List<TvShowItem>>(emptyList()) }
 
-    // Thread offloading: Shifts heavy file tree searching onto background IO routine pools
     LaunchedEffect(Unit) {
       withContext(Dispatchers.IO) {
         val rootDir = android.os.Environment.getExternalStorageDirectory()
@@ -145,7 +149,7 @@ object MainScreen : Screen {
       }
     }
 
-    val visibleTabs = remember(isShortsEnabled, enableTabRecents, enableTabPlaylists, enableTabNetwork, enableCineHub, cachedMovies, cachedTvShows) {
+    val visibleTabs = remember(isShortsEnabled, enableTabRecents, enableTabPlaylists, enableTabNetwork, enableCineHub, enableCineTube, enableCineTv, cachedMovies, cachedTvShows) {
       buildList {
         add(
           VisibleTab("home", "Home", Icons.Filled.Home) {
@@ -153,7 +157,6 @@ object MainScreen : Screen {
           }
         )
         
-        // --- CineHub tab wrapping bounded via conditional global state key checks ---
         if (enableCineHub) {
           add(
             VisibleTab("cinehub", "CineHub", Icons.Filled.Movie) {
@@ -174,23 +177,44 @@ object MainScreen : Screen {
           )
         }
 
-        // --- NEW: Online YouTube Invidious Stream Client Tab Registration ---
-        add(
-          VisibleTab("youtube", "YouTube", Icons.Filled.Language) {
-            app.marlboroadvance.mpvex.youtube.ui.YoutubeTabScreen(
-              onPlayRequested = { streamUrl, videoTitle ->
-                // Directly pipes remote streaming video tokens right into MPV internal video pipeline
-                val intent = Intent(context, PlayerActivity::class.java).apply {
-                  action = Intent.ACTION_VIEW
-                  data = Uri.parse(streamUrl)
-                  putExtra("title", videoTitle)
-                  putExtra("force_title", videoTitle)
+        // --- FIXED: Added Dynamic CineTube (YouTube/Invidious) Streaming Viewport ---
+        if (enableCineTube) {
+          add(
+            VisibleTab("cinetube", "CineTube", Icons.Filled.OndemandVideo) {
+              app.marlboroadvance.mpvex.youtube.ui.YoutubeTabScreen(
+                onPlayRequested = { streamUrl, videoTitle ->
+                  val intent = Intent(context, PlayerActivity::class.java).apply {
+                    action = Intent.ACTION_VIEW
+                    data = Uri.parse(streamUrl)
+                    putExtra("title", videoTitle)
+                    putExtra("force_title", videoTitle)
+                  }
+                  context.startActivity(intent)
                 }
-                context.startActivity(intent)
-              }
-            )
-          }
-        )
+              )
+            }
+          )
+        }
+
+        // --- FIXED: Added Dynamic CineTV (JioTV Live Channels) Viewport Layer ---
+        if (enableCineTv) {
+          add(
+            VisibleTab("cinetv", "CineTV", Icons.Filled.Tv) {
+              LiveTvTabScreen(
+                searchQuery = "", // Handled floating query filters natively inside current canvas
+                onPlayRequested = { liveStreamUrl, channelTitle ->
+                  val intent = Intent(context, PlayerActivity::class.java).apply {
+                    action = Intent.ACTION_VIEW
+                    data = Uri.parse(liveStreamUrl)
+                    putExtra("title", channelTitle)
+                    putExtra("force_title", channelTitle)
+                  }
+                  context.startActivity(intent)
+                }
+              )
+            }
+          )
+        }
         
         if (isShortsEnabled) {
           add(VisibleTab("shorts", "Shorts", Icons.Filled.VideoLibrary) { ShortsScreen().Content() })
