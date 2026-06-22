@@ -66,8 +66,12 @@ class BrowserPreferences(
   val enableTabPlaylists = preferenceStore.getBoolean("enable_tab_playlists", true)
   val enableTabNetwork = preferenceStore.getBoolean("enable_tab_network", true)
   
-  // --- NAYA: CineHub global visibility toggle backend mapping key ---
+  // --- CineHub global visibility toggle backend mapping key ---
   val enableCineHub = preferenceStore.getBoolean("enable_cinehub", true)
+
+  // --- UPDATED: New system visibility toggles for the newly added modules ---
+  val enableCineTube = preferenceStore.getBoolean("enable_cinetube", true)
+  val enableCineTv = preferenceStore.getBoolean("enable_cinetv", true)
 }
 
 /**
