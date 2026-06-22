@@ -62,7 +62,7 @@ import app.marlboroadvance.mpvex.cinehub.data.NfoScanner
 import app.marlboroadvance.mpvex.cinehub.model.MovieItem
 import app.marlboroadvance.mpvex.cinehub.model.TvShowItem
 import app.marlboroadvance.mpvex.ui.player.PlayerActivity
-import app.marlboroadvance.mpvex.cinetv.ui.LiveTvTabScreen // Injected new standalone module package
+import app.marlboroadvance.mpvex.cinetv.ui.LiveTvTabScreen 
 import android.content.Intent
 import android.net.Uri
 import java.io.File
@@ -125,7 +125,6 @@ object MainScreen : Screen {
     val enableTabPlaylists by browserPreferences.enableTabPlaylists.collectAsState()
     val enableTabNetwork by browserPreferences.enableTabNetwork.collectAsState()
     
-    // Live collecting toggle states configuration values from shared data preference mapping layer
     val enableCineHub by browserPreferences.enableCineHub.collectAsState()
     val enableCineTube by browserPreferences.enableCineTube.collectAsState()
     val enableCineTv by browserPreferences.enableCineTv.collectAsState()
@@ -133,22 +132,7 @@ object MainScreen : Screen {
     var cachedMovies by remember { mutableStateOf<List<MovieItem>>(emptyList()) }
     var cachedTvShows by remember { mutableStateOf<List<TvShowItem>>(emptyList()) }
 
-    LaunchedEffect(Unit) {
-      withContext(Dispatchers.IO) {
-        val rootDir = android.os.Environment.getExternalStorageDirectory()
-        try {
-          val movies = NfoScanner.scanDirectoryForMovies(rootDir)
-          val tvShows = NfoScanner.scanDirectoryForTvShows(rootDir)
-          withContext(Dispatchers.Main) {
-            cachedMovies = movies
-            cachedTvShows = tvShows
-          }
-        } catch (e: Exception) {
-          android.util.Log.e("CineHubInit", "Failed to compile asynchronous storage assets structure", e)
-        }
-      }
-    }
-
+    // --- RE-BUILT STABLE NAVIGATION FEEDS BUILDER ---
     val visibleTabs = remember(isShortsEnabled, enableTabRecents, enableTabPlaylists, enableTabNetwork, enableCineHub, enableCineTube, enableCineTv, cachedMovies, cachedTvShows) {
       buildList {
         add(
@@ -177,7 +161,6 @@ object MainScreen : Screen {
           )
         }
 
-        // --- FIXED: Added Dynamic CineTube (YouTube/Invidious) Streaming Viewport ---
         if (enableCineTube) {
           add(
             VisibleTab("cinetube", "CineTube", Icons.Filled.OndemandVideo) {
@@ -196,12 +179,11 @@ object MainScreen : Screen {
           )
         }
 
-        // --- FIXED: Added Dynamic CineTV (JioTV Live Channels) Viewport Layer ---
         if (enableCineTv) {
           add(
             VisibleTab("cinetv", "CineTV", Icons.Filled.Tv) {
               LiveTvTabScreen(
-                searchQuery = "", // Handled floating query filters natively inside current canvas
+                searchQuery = "", 
                 onPlayRequested = { liveStreamUrl, channelTitle ->
                   val intent = Intent(context, PlayerActivity::class.java).apply {
                     action = Intent.ACTION_VIEW
@@ -227,6 +209,29 @@ object MainScreen : Screen {
         }
         if (enableTabNetwork) {
           add(VisibleTab("network", "Network", Icons.Filled.Language) { NetworkStreamingScreen.Content() })
+        }
+      }
+    }
+
+    // --- FIXED: INTERACTIVE AUTO-SCAN TRIGGER ENGINE FOR CINEHUB ACTIVE SESSION ---
+    LaunchedEffect(selectedTab, visibleTabs) {
+      if (selectedTab in visibleTabs.indices) {
+        val activeTabId = visibleTabs[selectedTab].id
+        // Trigger file scanning automatically if CineHub screen becomes visible on layout frame
+        if (activeTabId == "cinehub") {
+          withContext(Dispatchers.IO) {
+            val rootDir = android.os.Environment.getExternalStorageDirectory()
+            try {
+              val movies = NfoScanner.scanDirectoryForMovies(rootDir)
+              val tvShows = NfoScanner.scanDirectoryForTvShows(rootDir)
+              withContext(Dispatchers.Main) {
+                cachedMovies = movies
+                cachedTvShows = tvShows
+              }
+            } catch (e: Exception) {
+              android.util.Log.e("CineHubInit", "Failed to compile asynchronous storage assets structure", e)
+            }
+          }
         }
       }
     }
