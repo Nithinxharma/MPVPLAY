@@ -282,8 +282,6 @@ object AppearancePreferencesScreen : Screen {
                             )
 
                             PreferenceDivider()
-
-                            
                             // --- INTEGRATION: CineHub preference switch layout ---
                             val enableCineHub by browserPreferences.enableCineHub.collectAsState()
                             SwitchPreference(
@@ -298,6 +296,41 @@ object AppearancePreferencesScreen : Screen {
                                 }
                             )
 
+                            PreferenceDivider()
+
+                            // --- INTEGRATION: CineTube preference switch layout ---
+                            val enableCineTube by browserPreferences.enableCineTube.collectAsState()
+                            SwitchPreference(
+                                value = enableCineTube,
+                                onValueChange = { browserPreferences.enableCineTube.set(it) },
+                                title = { Text(text = "CineTube") },
+                                summary = {
+                                    Text(
+                                        text = "Toggle online YouTube Invidious streaming trends engine",
+                                        color = MaterialTheme.colorScheme.outline,
+                                    )
+                                }
+                            )
+
+                            PreferenceDivider()
+
+                            // --- INTEGRATION: CineTV preference switch layout ---
+                            val enableCineTv by browserPreferences.enableCineTv.collectAsState()
+                            SwitchPreference(
+                                value = enableCineTv,
+                                onValueChange = { browserPreferences.enableCineTv.set(it) },
+                                title = { Text(text = "CineTV") },
+                                summary = {
+                                    Text(
+                                        text = "Toggle JioTV live broadcast channels gateway with proxy authentication",
+                                        color = MaterialTheme.colorScheme.outline,
+                                    )
+                                }
+                            )
+
+                            PreferenceDivider()
+
+                          
                             PreferenceDivider()
 
 
