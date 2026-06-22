@@ -331,7 +331,7 @@ object AppearancePreferencesScreen : Screen {
                             PreferenceDivider()
 
                           
-                            PreferenceDivider()
+                   
 
 
                             val enableShorts by browserPreferences.enableShorts.collectAsState()
