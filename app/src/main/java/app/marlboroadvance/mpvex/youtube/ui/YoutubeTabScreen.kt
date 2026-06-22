@@ -43,17 +43,15 @@ fun YoutubeTabScreen(
     var isLoading by remember { mutableStateOf(true) }
     var searchQuery by remember { mutableStateOf("") }
     var isSearching by remember { mutableStateOf(false) }
-    var isSearchBarVisible by remember { mutableStateOf(false) } // Controls top panel visibility toggle
+    var isSearchBarVisible by remember { mutableStateOf(false) } 
     var refreshTrigger by remember { mutableIntStateOf(0) }
     
-    // Quality Selector Sheet States
     var selectedVideoForQuality by remember { mutableStateOf<YoutubeVideo?>(null) }
     var isQualitySheetOpen by remember { mutableStateOf(false) }
 
     val scope = rememberCoroutineScope()
     val keyboardController = LocalSoftwareKeyboardController.current
 
-    // Combined Network Pipeline for Search Query vs Default Trending Stream Fetching
     LaunchedEffect(refreshTrigger, isSearching) {
         isLoading = true
         videoList = if (isSearching && searchQuery.isNotBlank()) {
@@ -67,21 +65,19 @@ fun YoutubeTabScreen(
     Scaffold(
         topBar = {
             Column(modifier = Modifier.fillMaxWidth()) {
-                // --- INTEGRATED UNIFIED BROWSER TOP BAR COMPONENT ---
+                // --- UPDATED BRANDING: CineTube Live Layout Injected ---
                 BrowserTopBar(
-                    title = if (isSearching) "Search Results" else "YouTube Live Stream",
+                    title = if (isSearching) "Search Results" else "CineTube Live Stream",
                     isInSelectionMode = false,
                     selectedCount = 0,
                     totalCount = videoList.size,
                     onCancelSelection = {},
-                    isHomeScreen = true, // Enables matching circular theme transitions natively
+                    isHomeScreen = true, 
                     onSearchClick = {
-                        // Toggles search panel slide overlay smoothly
                         isSearchBarVisible = !isSearchBarVisible
                     }
                 )
 
-                // Inline Expandable Search Panel triggered via Custom Header Action Button
                 AnimatedVisibility(
                     visible = isSearchBarVisible,
                     enter = fadeIn(),
@@ -98,7 +94,7 @@ fun YoutubeTabScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(start = 16.dp, end = 16.dp, bottom = 12.dp, top = 8.dp),
-                            placeholder = { Text("Search videos popular in India...") },
+                            placeholder = { Text("Search CineTube vectors popular in India...") },
                             trailingIcon = {
                                 if (searchQuery.isNotEmpty() || isSearching) {
                                     IconButton(onClick = {
@@ -145,7 +141,7 @@ fun YoutubeTabScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = if (isSearching) "No search results found for India." else "Network timeout or instance down.",
+                        text = if (isSearching) "No search results found for India." else "Network timeout or node offline.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.outline
                     )
@@ -228,7 +224,6 @@ fun YoutubeTabScreen(
                 }
             }
 
-            // Video Resolution Quality Selector Sheet Component
             if (isQualitySheetOpen && selectedVideoForQuality != null) {
                 ModalBottomSheet(
                     onDismissRequest = { 
