@@ -28,8 +28,8 @@ object JioTvRepo {
 
     fun initTokens(context: Context) {
         val prefs = context.getSharedPreferences("JioTvAuthPrefs", Context.MODE_PRIVATE)
-        cachedToken = prefs.getString("sso_token", "") ?: "[span_3](start_span)"[span_3](end_span)
-        cachedCrm = prefs.getString("crm_token", "") ?: "[span_4](start_span)"[span_4](end_span)
+        cachedToken = prefs.getString("sso_token", "") ?: ""
+        cachedCrm = prefs.getString("crm_token", "") ?: ""
     }
 
     fun isUserLoggedIn(): Boolean = cachedToken.isNotBlank()
@@ -74,16 +74,16 @@ object JioTvRepo {
                     val body = response.body?.string() ?: return@withContext false
                     val parsed = json.parseToJsonElement(body).jsonObject
                     
-                    val ssoToken = parsed["ssoToken"]?.jsonPrimitive?.content ?: "[span_5](start_span)"[span_5](end_span)
-                    val crmToken = parsed["sessionAttributes"]?.jsonObject?.get("userCrmId")?.jsonPrimitive?.content ?: "crm_pass_2026[span_6](start_span)"[span_6](end_span)
+                    val ssoToken = parsed["ssoToken"]?.jsonPrimitive?.content ?: ""
+                    val crmToken = parsed["sessionAttributes"]?.jsonObject?.get("userCrmId")?.jsonPrimitive?.content ?: "crm_pass_2026"
 
                     if (ssoToken.isNotBlank()) {
                         cachedToken = ssoToken
                         cachedCrm = crmToken
                         
                         context.getSharedPreferences("JioTvAuthPrefs", Context.MODE_PRIVATE).edit()
-                            .putString("sso_token", ssoToken)[span_7](start_span)[span_7](end_span)
-                            .putString("crm_token", crmToken)[span_8](start_span)[span_8](end_span)
+                            .putString("sso_token", ssoToken)
+                            .putString("crm_token", crmToken)
                             .apply()
                         return@withContext true
                     }
@@ -96,24 +96,22 @@ object JioTvRepo {
     }
 
     /**
-     * Reads channel objects directly from the local assets directory tree[span_9](start_span)[span_9](end_span)[span_10](start_span)[span_10](end_span)
+     * Reads and parses channels database dynamically from project local assets
      */
     suspend fun fetchLiveChannelsFromAssets(context: Context): List<LiveChannelItem> = withContext(Dispatchers.IO) {
         val list = mutableListOf<LiveChannelItem>()
         try {
-            // Read local database mapping structural nodes safely[span_11](start_span)[span_11](end_span)
-            val inputStream: InputStream = context.assets.open("channels.json")[span_12](start_span)[span_12](end_span)
+            val inputStream: InputStream = context.assets.open("channels.json")
             val jsonString = inputStream.bufferedReader().use { it.readText() }
-            val rootObject = json.parseToJsonElement(jsonString).jsonObject[span_13](start_span)[span_13](end_span)
+            val rootObject = json.parseToJsonElement(jsonString).jsonObject
 
-            rootObject.keys.forEach { channelId ->
-                val channelNode = rootObject[channelId]?.jsonObject ?: return@forEach
-                val name = channelNode["name"]?.jsonPrimitive?.content ?: "[span_14](start_span)"[span_14](end_span)
-                val genre = channelNode["genre"]?.jsonPrimitive?.content ?: "News[span_15](start_span)"[span_15](end_span)
-                val language = channelNode["language"]?.jsonPrimitive?.content ?: "Hindi[span_16](start_span)"[span_16](end_span)
-                val defaultLogo = channelNode["default_logo"]?.jsonPrimitive?.content ?: "$channelId.png[span_17](start_span)"[span_17](end_span)
+            for ((channelId, channelElement) in rootObject) {
+                val channelNode = channelElement.jsonObject
+                val name = channelNode["name"]?.jsonPrimitive?.content ?: ""
+                val genre = channelNode["genre"]?.jsonPrimitive?.content ?: "News"
+                val language = channelNode["language"]?.jsonPrimitive?.content ?: "Hindi"
+                val defaultLogo = channelNode["default_logo"]?.jsonPrimitive?.content ?: "$channelId.png"
                 
-                // Absolute image source resolution logic mapping
                 val logoUrl = "https://jiotvimages.media.jio.com/jiotv_logos/$defaultLogo"
 
                 if (name.isNotBlank()) {
@@ -130,13 +128,17 @@ object JioTvRepo {
                 }
             }
         } catch (e: Exception) {
-            Log.e("JioTvRepo", "Asset read exception, running basic static map arrays as fallback execution context.")
+            Log.e("JioTvRepo", "Assets read parsing failed, loading recovery fallback list arrays.")
             val fallbacks = listOf("Entertainment", "Sports", "News", "Movies")
             for (i in 1..10) {
                 list.add(
                     LiveChannelItem(
-                        channelId = "173", title = "Aaj Tak HD Fallback", category = fallbacks[i % fallbacks.size],
-                        language = "Hindi", logoUrl = "https://jiotvimages.media.jio.com/jiotv_logos/Aaj_Tak.png", streamUrlHash = "jiotv_live:173"
+                        channelId = "173",
+                        title = "Aaj Tak HD Fallback",
+                        category = fallbacks[i % fallbacks.size],
+                        language = "Hindi",
+                        logoUrl = "https://jiotvimages.media.jio.com/jiotv_logos/Aaj_Tak.png",
+                        streamUrlHash = "jiotv_live:173"
                     )
                 )
             }
@@ -145,9 +147,9 @@ object JioTvRepo {
     }
 
     suspend fun getResolvedLiveUrl(channelId: String): String = withContext(Dispatchers.IO) {
-        val token = if (cachedToken.isBlank()) "mock_token" else cachedToken[span_18](start_span)[span_18](end_span)
-        val crm = if (cachedCrm.isBlank()) "mock_crm" else cachedCrm[span_19](start_span)[span_19](end_span)
-        return@withContext "https://jiotv.live.cdn.jio.com/$channelId/${channelId}_hd.m3u8?ver=2026&ssoToken=$token&crm=$crm[span_20](start_span)"[span_20](end_span)
+        val token = if (cachedToken.isBlank()) "mock_token" else cachedToken
+        val crm = if (cachedCrm.isBlank()) "mock_crm" else cachedCrm
+        return@withContext "https://jiotv.live.cdn.jio.com/$channelId/${channelId}_hd.m3u8?ver=2026&ssoToken=$token&crm=$crm"
     }
 
     fun logout(context: Context) {
