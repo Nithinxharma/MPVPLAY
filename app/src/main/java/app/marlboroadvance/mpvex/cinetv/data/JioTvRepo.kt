@@ -105,12 +105,26 @@ object JioTvRepo {
     private var cachedM3uEntries: List<M3uEntry>? = null
 
     private fun normalizeName(name: String): String {
-        return name.replace(Regex("(?i)\\b(HD|SD|4K|UHD)\\b"), "")
-            .replace("+", "")
+        var n = name.lowercase()
+        
+        // Manual alias routing
+        n = n.replace(Regex("\\bnick\\b"), "nickelodeon")
+        
+        // Strip non-essential formatting wrappers
+        val stopWords = listOf(
+            "hd", "sd", "4k", "uhd", "hindi", "english", "tamil", "telugu", "kannada", 
+            "malayalam", "marathi", "gujarati", "punjabi", "bengali", "odia", "bhojpuri", 
+            "urdu", "international", "regional", "plus", "tv", "channel"
+        )
+        
+        for (word in stopWords) {
+            n = n.replace(Regex("\\b$word\\b"), "")
+        }
+        
+        return n.replace("+", "")
             .replace("-", "")
             .replace("_", "")
             .replace(" ", "")
-            .lowercase()
             .trim()
     }
 
@@ -138,14 +152,32 @@ object JioTvRepo {
         return entries
     }
 
+    // FIX BLACK SCREEN: Performs deep inspection to verify segments actually exist 
     private fun testM3uStream(url: String): Boolean {
         try {
-            val req = Request.Builder().url(url).head().build()
+            val req = Request.Builder().url(url).header("User-Agent", JIO_USER_AGENT).build()
             quickClient.newCall(req).execute().use { res ->
-                if (res.isSuccessful) return true
-                if (res.code == 405) { // Some servers block HEAD
-                    val getReq = Request.Builder().url(url).build()
-                    quickClient.newCall(getReq).execute().use { getRes -> return getRes.isSuccessful }
+                if (!res.isSuccessful) return false
+                val body = res.body?.string() ?: return false
+                if (!body.contains("#EXTM3U")) return false
+                
+                // If it's a master playlist, verify its highest resolution chunklist
+                if (body.contains("#EXT-X-STREAM-INF")) {
+                    val lines = body.lines()
+                    val chunklistLine = lines.firstOrNull { it.endsWith(".m3u8") && !it.startsWith("#") }
+                    if (chunklistLine != null) {
+                        val chunklistUrl = if (chunklistLine.startsWith("http")) chunklistLine else {
+                            val baseUrl = url.substringBeforeLast("/")
+                            "$baseUrl/$chunklistLine"
+                        }
+                        val chunkReq = Request.Builder().url(chunklistUrl).header("User-Agent", JIO_USER_AGENT).build()
+                        quickClient.newCall(chunkReq).execute().use { chunkRes ->
+                            val chunkBody = chunkRes.body?.string() ?: ""
+                            return chunkRes.isSuccessful && chunkBody.contains("#EXTINF")
+                        }
+                    }
+                } else if (body.contains("#EXTINF")) {
+                    return true
                 }
                 return false
             }
@@ -168,6 +200,7 @@ object JioTvRepo {
         
         matches = matches.sortedByDescending { it.qualityScore }
         
+        // Loops through duplicates automatically skipping dead black screen chunks
         for (entry in matches) {
             if (testM3uStream(entry.url)) return entry.url
         }
@@ -457,10 +490,10 @@ object JioTvRepo {
             
             return@withContext ResolvedStream(jioUrl, PlaybackSource.JIO_TV)
         } catch (e: Exception) {
+            // PAID CHANNELS / GEO RESTRICTED FALLBACK INTERCEPT (including 403, 3012, 404, 500)
             entry.failureCount++
             saveChannelCache(context, entry)
 
-            // Notify UI silently before starting the search
             withContext(Dispatchers.Main) {
                 Toast.makeText(context, "JioTV unavailable. Searching fallback streams...", Toast.LENGTH_SHORT).show()
             }
