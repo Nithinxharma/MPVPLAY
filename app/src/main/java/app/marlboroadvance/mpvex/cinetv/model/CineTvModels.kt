@@ -20,18 +20,9 @@ data class LiveChannelItem(
     val variants: List<ChannelVariant> = emptyList()
 ) {
     fun getIdForLanguage(lang: String): String {
-        return variants.find { it.language == lang }?.channelId ?: defaultChannelId
+        return variants.find { it.language.equals(lang, ignoreCase = true) }?.channelId ?: defaultChannelId
     }
 }
-
-data class EpgData(
-    val programName: String,
-    val startTimeMs: Long,
-    val endTimeMs: Long,
-    val nextProgramName: String,
-    val nextStartTimeMs: Long,
-    val description: String = "Live TV Broadcast"
-)
 
 data class DiagnosticResult(
     val channelName: String,
