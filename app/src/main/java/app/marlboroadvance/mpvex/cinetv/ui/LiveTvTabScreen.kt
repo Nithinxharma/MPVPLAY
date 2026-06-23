@@ -381,12 +381,15 @@ fun LiveTvTabScreen(
             }
         }
 
-        // Lightweight User Feedback Prompt (Appears without interrupting the user when they return from playback)
+        // Lightweight User Feedback Prompt (Appears safely above Navigation and IME)
         AnimatedVisibility(
             visible = pendingFeedbackChannel != null && smartCache[pendingFeedbackChannel?.defaultChannelId]?.userFeedback == null,
             enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
             exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
-            modifier = Modifier.align(Alignment.BottomCenter)
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding() // Ensures it sits above system nav
+                .imePadding()            // Ensures it sits above keyboard if active
         ) {
             if (pendingFeedbackChannel != null) {
                 val channelId = pendingFeedbackChannel!!.defaultChannelId
@@ -394,7 +397,7 @@ fun LiveTvTabScreen(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                     elevation = CardDefaults.cardElevation(8.dp),
                     shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.fillMaxWidth(0.9f).padding(bottom = 60.dp)
+                    modifier = Modifier.fillMaxWidth(0.9f).padding(bottom = 16.dp)
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text("Did ${pendingFeedbackChannel!!.title} play correctly?", fontWeight = FontWeight.Bold, fontSize = 14.sp)
