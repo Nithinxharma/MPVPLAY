@@ -35,3 +35,21 @@ data class DiagnosticResult(
     val timeTakenMs: Long = 0L,
     val resolvedUrl: String = ""
 )
+
+enum class PlaybackSource { JIO_TV, M3U }
+
+data class ResolvedStream(
+    val url: String,
+    val source: PlaybackSource
+)
+
+data class ChannelCacheEntry(
+    val channelId: String,
+    val normalizedName: String,
+    var preferredSource: PlaybackSource,
+    var lastSuccessfulUrl: String? = null,
+    var lastTestedTime: Long = 0,
+    var failureCount: Int = 0,
+    var successCount: Int = 0,
+    var userFeedback: Boolean? = null
+)
