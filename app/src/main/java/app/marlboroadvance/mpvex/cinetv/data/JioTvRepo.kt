@@ -14,6 +14,7 @@ import java.util.concurrent.TimeUnit
 import java.util.UUID
 import app.marlboroadvance.mpvex.cinetv.model.LiveChannelItem
 import app.marlboroadvance.mpvex.cinetv.model.ChannelVariant
+import app.marlboroadvance.mpvex.cinetv.model.EpgData
 
 object JioTvRepo {
     val client = OkHttpClient.Builder()
@@ -236,7 +237,6 @@ object JioTvRepo {
                     throw Exception("API returned empty 'result' array. Is token expired?")
                 }
 
-                // Temp structure to group languages
                 val rawChannels = mutableListOf<RawChannel>()
 
                 for (i in 0 until resultArr.size) {
@@ -250,7 +250,6 @@ object JioTvRepo {
                     rawChannels.add(RawChannel(id, name, getCategoryName(catId), getLanguageName(langId), "https://jiotvimages.cdn.jio.com/dare_images/images/$rawLogoUrl"))
                 }
 
-                // Group by Channel Name to eliminate duplicates and capture all language variants
                 val grouped = rawChannels.groupBy { it.name }
                 for ((name, channels) in grouped) {
                     val baseChannel = channels.first()
@@ -322,14 +321,77 @@ object JioTvRepo {
                 val code = parsed["code"]?.jsonPrimitive?.intOrNull
                 
                 if (code == 200) {
-                    return@withContext parsed["result"]?.jsonPrimitive?.content ?: ""
+                    val m3u8Url = parsed["result"]?.jsonPrimitive?.content ?: ""
+                    
+                    // Priority 1: Actual Stream Execution/Validation
+                    // This forces the pipeline to test if MPV will actually succeed and accurately reports failures
+                    val manifestReq = Request.Builder().url(m3u8Url)
+                        .header("User-Agent", "plaYtv/7.0.8 (Linux;Android 9) ExoPlayerLib/2.11.7") 
+                        .build()
+                        
+                    client.newCall(manifestReq).execute().use { manifestRes ->
+                        val manifestBody = manifestRes.body?.string() ?: ""
+                        if (!manifestRes.isSuccessful || (!manifestBody.contains("#EXTM3U") && !manifestBody.contains("#EXTINF"))) {
+                            val status = manifestRes.code
+                            val reason = when {
+                                status == 403 -> "Subscription Required"
+                                status == 401 -> "Token Expired"
+                                status == 404 -> "Stream Offline / Not Found"
+                                manifestBody.contains("Subscription Required", ignoreCase = true) -> "Subscription Required"
+                                manifestBody.contains("Geo Restricted", ignoreCase = true) -> "Geo Restricted"
+                                else -> "Manifest Error / Playback Failed"
+                            }
+                            // We embed the status code into the exception message separated by a pipe for parsing later
+                            throw Exception("$reason|$status")
+                        }
+                    }
+                    return@withContext m3u8Url
                 } else {
-                    throw Exception(parsed["message"]?.jsonPrimitive?.content ?: "Stream Error $code")
+                    val msg = parsed["message"]?.jsonPrimitive?.content ?: "Stream Error $code"
+                    throw Exception("$msg|$code")
                 }
             } catch (e: Exception) {
                 throw e
             }
         }
+    }
+
+    suspend fun fetchEpgForChannel(channelId: String): EpgData? = withContext(Dispatchers.IO) {
+        try {
+            val req = Request.Builder().url("https://jiotv.data.cdn.jio.com/apis/v1.3/getepg/get?offset=0&channel_id=$channelId").build()
+            client.newCall(req).execute().use { res ->
+                val body = res.body?.string() ?: return@use null
+                val root = json.parseToJsonElement(body).jsonObject
+                val epgArray = root["epg"]?.jsonArray ?: return@use null
+                
+                val currentTime = System.currentTimeMillis()
+                var currentEpg: JsonObject? = null
+                var nextEpg: JsonObject? = null
+                
+                for (i in 0 until epgArray.size) {
+                    val prog = epgArray[i].jsonObject
+                    val st = prog["startTime"]?.jsonPrimitive?.longOrNull ?: continue
+                    val et = prog["endTime"]?.jsonPrimitive?.longOrNull ?: continue
+                    
+                    if (currentTime in st..et) {
+                        currentEpg = prog
+                        if (i + 1 < epgArray.size) nextEpg = epgArray[i + 1].jsonObject
+                        break
+                    }
+                }
+                
+                if (currentEpg != null) {
+                    return@use EpgData(
+                        programName = currentEpg["programName"]?.jsonPrimitive?.content ?: "Live TV",
+                        startTimeMs = currentEpg["startTime"]?.jsonPrimitive?.long ?: 0L,
+                        endTimeMs = currentEpg["endTime"]?.jsonPrimitive?.long ?: 0L,
+                        nextProgramName = nextEpg?.get("programName")?.jsonPrimitive?.content ?: "Upcoming Program",
+                        nextStartTimeMs = nextEpg?.get("startTime")?.jsonPrimitive?.long ?: 0L
+                    )
+                }
+                null
+            }
+        } catch (e: Exception) { null }
     }
 
     fun logout(context: Context) {
