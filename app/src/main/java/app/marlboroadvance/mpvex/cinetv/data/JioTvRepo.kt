@@ -1,8 +1,11 @@
 package app.marlboroadvance.mpvex.cinetv.data
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.util.Base64
 import android.util.Log
+import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
@@ -10,6 +13,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.File
 import java.util.concurrent.TimeUnit
 import java.util.UUID
 import app.marlboroadvance.mpvex.cinetv.model.LiveChannelItem
@@ -20,12 +24,16 @@ object JioTvRepo {
     val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .followSslRedirects(true)
         .build()
 
     private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
     
     @Volatile private var cachedToken: String = ""
     @Volatile private var cachedCrm: String = ""
+
+    private const val JIO_USER_AGENT = "plaYtv/7.0.8 (Linux;Android 9) ExoPlayerLib/2.11.7"
 
     private fun restoreSessionFromAssets(context: Context): Boolean {
         try {
@@ -194,7 +202,6 @@ object JioTvRepo {
 
     suspend fun fetchLiveChannelsFromAssets(context: Context): List<LiveChannelItem> = withContext(Dispatchers.IO) {
         val list = mutableListOf<LiveChannelItem>()
-        
         val prefs = context.getSharedPreferences("JioTvAuthPrefs", Context.MODE_PRIVATE)
         val ssoToken = prefs.getString("ssoToken", "") ?: ""
         val authToken = prefs.getString("authToken", "") ?: ""
@@ -269,7 +276,6 @@ object JioTvRepo {
                 }
 
             } catch (e: Exception) {
-                Log.e("JioTvRepo", "JSON Parsing Failed on Channels API", e)
                 throw Exception("Failed to parse channel JSON: ${e.message}")
             }
         }
@@ -321,33 +327,61 @@ object JioTvRepo {
                 val code = parsed["code"]?.jsonPrimitive?.intOrNull
                 
                 if (code == 200) {
-                    val m3u8Url = parsed["result"]?.jsonPrimitive?.content ?: ""
+                    val m3u8Url = parsed["result"]?.jsonPrimitive?.content ?: throw Exception("Empty manifest URL returned|500")
                     
-                    // Priority 1: Actual Stream Execution/Validation
-                    // This forces the pipeline to test if MPV will actually succeed and accurately reports failures
+                    // PRE-PLAYBACK VERIFICATION
+                    // We must verify the manifest has chunks to prevent the PlayerActivity black screen
                     val manifestReq = Request.Builder().url(m3u8Url)
-                        .header("User-Agent", "plaYtv/7.0.8 (Linux;Android 9) ExoPlayerLib/2.11.7") 
+                        .header("User-Agent", JIO_USER_AGENT)
                         .build()
                         
                     client.newCall(manifestReq).execute().use { manifestRes ->
                         val manifestBody = manifestRes.body?.string() ?: ""
-                        if (!manifestRes.isSuccessful || (!manifestBody.contains("#EXTM3U") && !manifestBody.contains("#EXTINF"))) {
+                        
+                        if (!manifestRes.isSuccessful) {
                             val status = manifestRes.code
-                            val reason = when {
-                                status == 403 -> "Subscription Required"
-                                status == 401 -> "Token Expired"
-                                status == 404 -> "Stream Offline / Not Found"
-                                manifestBody.contains("Subscription Required", ignoreCase = true) -> "Subscription Required"
-                                manifestBody.contains("Geo Restricted", ignoreCase = true) -> "Geo Restricted"
-                                else -> "Manifest Error / Playback Failed"
+                            val reason = when (status) {
+                                403 -> "Subscription Required / 403 Forbidden"
+                                401 -> "Token Expired / Unauthorized"
+                                404 -> "Stream Offline"
+                                else -> "Manifest Request Failed"
                             }
-                            // We embed the status code into the exception message separated by a pipe for parsing later
                             throw Exception("$reason|$status")
                         }
+
+                        if (!manifestBody.contains("#EXTM3U")) {
+                            if (manifestBody.contains("Subscription Required", true)) throw Exception("Subscription Required|403")
+                            if (manifestBody.contains("Geo Restricted", true)) throw Exception("Geo Restricted|403")
+                            throw Exception("Invalid Manifest Format|500")
+                        }
+                        
+                        // If it's a master playlist, we extract the highest bandwidth chunklist to verify segments
+                        if (manifestBody.contains("#EXT-X-STREAM-INF")) {
+                            val lines = manifestBody.lines()
+                            val chunklistLine = lines.firstOrNull { it.endsWith(".m3u8") && !it.startsWith("#") }
+                            if (chunklistLine != null) {
+                                val chunklistUrl = if (chunklistLine.startsWith("http")) chunklistLine else {
+                                    val baseUrl = m3u8Url.substringBeforeLast("/")
+                                    "$baseUrl/$chunklistLine"
+                                }
+                                
+                                val chunkReq = Request.Builder().url(chunklistUrl).header("User-Agent", JIO_USER_AGENT).build()
+                                client.newCall(chunkReq).execute().use { chunkRes ->
+                                    val chunkBody = chunkRes.body?.string() ?: ""
+                                    if (!chunkRes.isSuccessful || !chunkBody.contains("#EXTINF")) {
+                                        throw Exception("Empty Playlist / No Segments|404")
+                                    }
+                                }
+                            }
+                        } else if (!manifestBody.contains("#EXTINF")) {
+                             throw Exception("Empty Playlist / No Segments|404")
+                        }
                     }
+                    
+                    // Note to developer: Ensure PlayerActivity passes JIO_USER_AGENT to MPV
                     return@withContext m3u8Url
                 } else {
-                    val msg = parsed["message"]?.jsonPrimitive?.content ?: "Stream Error $code"
+                    val msg = parsed["message"]?.jsonPrimitive?.content ?: "API Error"
                     throw Exception("$msg|$code")
                 }
             } catch (e: Exception) {
@@ -386,12 +420,46 @@ object JioTvRepo {
                         startTimeMs = currentEpg["startTime"]?.jsonPrimitive?.long ?: 0L,
                         endTimeMs = currentEpg["endTime"]?.jsonPrimitive?.long ?: 0L,
                         nextProgramName = nextEpg?.get("programName")?.jsonPrimitive?.content ?: "Upcoming Program",
-                        nextStartTimeMs = nextEpg?.get("startTime")?.jsonPrimitive?.long ?: 0L
+                        nextStartTimeMs = nextEpg?.get("startTime")?.jsonPrimitive?.long ?: 0L,
+                        description = currentEpg["description"]?.jsonPrimitive?.content ?: "Live TV Broadcast"
                     )
                 }
                 null
             }
         } catch (e: Exception) { null }
+    }
+
+    suspend fun exportWorkingStreamsAsM3u(context: Context, channelsToTest: List<LiveChannelItem>) {
+        withContext(Dispatchers.IO) {
+            val file = File(context.cacheDir, "working_channels.m3u")
+            file.bufferedWriter().use { out ->
+                out.write("#EXTM3U\n")
+                for (channel in channelsToTest) {
+                    try {
+                        val m3u8 = getResolvedLiveUrl(context, channel.defaultChannelId)
+                        out.write("#EXTINF:-1 tvg-id=\"${channel.defaultChannelId}\" tvg-logo=\"${channel.logoUrl}\" group-title=\"${channel.category}\",${channel.title}\n")
+                        out.write("$m3u8\n")
+                    } catch (e: Exception) {
+                        // Skip failed
+                    }
+                }
+            }
+            
+            // Trigger Share
+            withContext(Dispatchers.Main) {
+                try {
+                    val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", file)
+                    val intent = Intent(Intent.ACTION_SEND).apply {
+                        type = "audio/mpegurl"
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    context.startActivity(Intent.createChooser(intent, "Export Working M3U"))
+                } catch (e: Exception) {
+                    Log.e("JioTvRepo", "FileProvider export failed", e)
+                }
+            }
+        }
     }
 
     fun logout(context: Context) {
