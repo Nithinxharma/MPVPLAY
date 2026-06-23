@@ -39,7 +39,6 @@ object JioTvRepo {
             var cookieStr = ""
             
             try {
-                // Read & Decode creds.jtv exactly as PHP decrypt_data fallback expects (base64 raw payload)
                 val credsBase64 = context.assets.open("creds.jtv").bufferedReader().readText()
                 val decodedCreds = String(Base64.decode(credsBase64, Base64.DEFAULT))
                 val jsonObj = json.parseToJsonElement(decodedCreds).jsonObject
@@ -55,7 +54,6 @@ object JioTvRepo {
             } catch (e: Exception) { Log.d("JioTvRepo", "Failed decoding creds.jtv: ${e.message}") }
             
             try {
-                // Read cookie.jtv (hex encoded __hdnea__)
                 val cookieHex = context.assets.open("cookie.jtv").bufferedReader().readText().trim()
                 val cookieBytes = cookieHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
                 cookieStr = String(cookieBytes)
@@ -120,7 +118,6 @@ object JioTvRepo {
             val fullPhone = if (mobileNumber.startsWith("+91")) mobileNumber else "+91$mobileNumber"
             val encodedPhone = Base64.encodeToString(fullPhone.toByteArray(), Base64.NO_WRAP)
             
-            // Replicating exactly PHP's sha1 + rand string generation (16 length)
             val genDeviceId = UUID.randomUUID().toString().replace("-", "").substring(0, 16)
             
             val jsonPayload = buildJsonObject {
@@ -177,7 +174,6 @@ object JioTvRepo {
                     }
                 }
                 
-                // Fallback to strict error parsing per PHP cpfunctions.php requirement
                 var errorMsg = "Unknown Error Occured : Code ${response.code}"
                 if (parsed.containsKey("message") && parsed["message"]?.jsonPrimitive?.content?.isNotBlank() == true) {
                     errorMsg = "Jio Error - " + parsed["message"]?.jsonPrimitive?.content
@@ -196,30 +192,78 @@ object JioTvRepo {
 
     suspend fun fetchLiveChannelsFromAssets(context: Context): List<LiveChannelItem> = withContext(Dispatchers.IO) {
         val list = mutableListOf<LiveChannelItem>()
-        try {
-            // Unfurled URL dynamically parsed by PHP's file_get_contents(base64_decode(strrev($url)))
-            val request = Request.Builder()
-                .url("https://raw.githubusercontent.com/mitthu786/api/main/jiotv.json")
-                .get()
-                .build()
-                
-            client.newCall(request).execute().use { response ->
-                if (response.isSuccessful) {
-                    val body = response.body?.string() ?: ""
-                    val rootArray = json.parseToJsonElement(body).jsonArray
-                    for (i in 0 until rootArray.size) {
-                        val channelNode = rootArray[i].jsonObject
-                        val id = channelNode["channel_id"]?.jsonPrimitive?.content ?: ""
-                        val name = channelNode["channel_name"]?.jsonPrimitive?.content ?: ""
-                        val category = channelNode["channelCategoryId"]?.jsonPrimitive?.content ?: "Entertainment"
-                        val language = channelNode["channelLanguageId"]?.jsonPrimitive?.content ?: "Hindi"
-                        val logoUrl = channelNode["logoUrl"]?.jsonPrimitive?.content ?: ""
-                        
-                        list.add(LiveChannelItem(id, name, category, language, logoUrl, "jiotv_live:$id"))
-                    }
-                }
+        
+        val prefs = context.getSharedPreferences("JioTvAuthPrefs", Context.MODE_PRIVATE)
+        val ssoToken = prefs.getString("ssoToken", "") ?: ""
+        val authToken = prefs.getString("authToken", "") ?: ""
+        val deviceId = prefs.getString("deviceId", "") ?: ""
+        val uniqueId = prefs.getString("uniqueId", "") ?: ""
+        val crm = prefs.getString("crmToken", "") ?: ""
+        
+        val url = "https://jiotv.data.cdn.jio.com/apis/v1.4/getMobileChannelList/get/?os=android&devicetype=phone"
+        Log.d("JioTvRepo", "Fetching Live Channels API: $url")
+
+        val request = Request.Builder()
+            .url(url)
+            .get()
+            .addHeader("Accept", "application/json")
+            .addHeader("User-Agent", "okhttp/3.14.9")
+            .addHeader("os", "android")
+            .addHeader("devicetype", "phone")
+            .addHeader("ssotoken", ssoToken)
+            .addHeader("accesstoken", authToken)
+            .addHeader("subscriberid", crm)
+            .addHeader("crmid", crm)
+            .addHeader("uniqueid", uniqueId)
+            .addHeader("deviceid", deviceId)
+            .build()
+            
+        client.newCall(request).execute().use { response ->
+            val body = response.body?.string() ?: ""
+            Log.d("JioTvRepo", "Channels API Response Code: ${response.code}")
+            Log.d("JioTvRepo", "Channels API Response Headers: ${response.headers}")
+            Log.d("JioTvRepo", "Channels API Response Body: ${body.take(1500)}")
+
+            if (!response.isSuccessful) {
+                throw Exception("HTTP Error ${response.code}: $body")
             }
-        } catch (e: Exception) { Log.e("JioTvRepo", "Failed to fetch channels from API", e) }
+            if (body.isBlank()) {
+                throw Exception("Server returned empty response.")
+            }
+
+            try {
+                val root = json.parseToJsonElement(body).jsonObject
+                
+                if (root.containsKey("code") && root["code"]?.jsonPrimitive?.intOrNull != 200) {
+                    throw Exception("API Error Code: ${root["code"]?.jsonPrimitive?.content} - Message: ${root["message"]?.jsonPrimitive?.content}")
+                }
+                
+                val resultArr = root["result"]?.jsonArray
+                if (resultArr == null || resultArr.isEmpty()) {
+                    throw Exception("API returned empty 'result' array. Is token expired? Body: ${body.take(500)}")
+                }
+
+                for (i in 0 until resultArr.size) {
+                    val channelNode = resultArr[i].jsonObject
+                    val id = channelNode["channel_id"]?.jsonPrimitive?.content ?: continue
+                    val name = channelNode["channel_name"]?.jsonPrimitive?.content ?: "Unknown"
+                    val catId = channelNode["channelCategoryId"]?.jsonPrimitive?.intOrNull ?: 0
+                    val langId = channelNode["channelLanguageId"]?.jsonPrimitive?.intOrNull ?: 0
+                    
+                    val rawLogoUrl = channelNode["logoUrl"]?.jsonPrimitive?.content ?: "$id.png"
+                    
+                    val category = getCategoryName(catId)
+                    val language = getLanguageName(langId)
+                    val logoUrl = "https://jiotvimages.cdn.jio.com/dare_images/images/$rawLogoUrl"
+                    
+                    list.add(LiveChannelItem(id, name, category, language, logoUrl, "jiotv_live:$id"))
+                }
+                Log.d("JioTvRepo", "Successfully parsed ${list.size} channels.")
+            } catch (e: Exception) {
+                Log.e("JioTvRepo", "JSON Parsing Failed on Channels API", e)
+                throw Exception("Failed to parse channel JSON: ${e.message}")
+            }
+        }
         return@withContext list
     }
 
@@ -286,5 +330,45 @@ object JioTvRepo {
         cachedToken = ""
         cachedCrm = ""
         context.getSharedPreferences("JioTvAuthPrefs", Context.MODE_PRIVATE).edit().clear().apply()
+    }
+
+    private fun getCategoryName(id: Int): String = when (id) {
+        1 -> "Entertainment"
+        2 -> "Movies"
+        3 -> "Kids"
+        4 -> "Sports"
+        5 -> "Lifestyle"
+        6 -> "Infotainment"
+        7 -> "News"
+        8 -> "Music"
+        9 -> "Devotional"
+        10 -> "Lifestyle"
+        11 -> "Infotainment"
+        12 -> "Regional"
+        13 -> "Business"
+        14 -> "Educational"
+        15 -> "Shopping"
+        16 -> "JioDarshan"
+        else -> "General"
+    }
+
+    private fun getLanguageName(id: Int): String = when (id) {
+        1 -> "Hindi"
+        2 -> "Marathi"
+        3 -> "Punjabi"
+        4 -> "Urdu"
+        5 -> "Bengali"
+        6 -> "English"
+        7 -> "Malayalam"
+        8 -> "Tamil"
+        9 -> "Gujarati"
+        10 -> "Odia"
+        11 -> "Telugu"
+        12 -> "Bhojpuri"
+        13 -> "Kannada"
+        14 -> "Assamese"
+        15 -> "Nepali"
+        16 -> "French"
+        else -> "Other"
     }
 }
