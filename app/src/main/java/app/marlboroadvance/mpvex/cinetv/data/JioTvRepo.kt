@@ -18,7 +18,6 @@ import java.util.concurrent.TimeUnit
 import java.util.UUID
 import app.marlboroadvance.mpvex.cinetv.model.LiveChannelItem
 import app.marlboroadvance.mpvex.cinetv.model.ChannelVariant
-import app.marlboroadvance.mpvex.cinetv.model.EpgData
 
 object JioTvRepo {
     val client = OkHttpClient.Builder()
@@ -291,6 +290,7 @@ object JioTvRepo {
         val deviceId = prefs.getString("deviceId", "") ?: ""
         val uniqueId = prefs.getString("uniqueId", "") ?: ""
         val crm = prefs.getString("crmToken", "") ?: ""
+        val sessionCookie = prefs.getString("sessionCookie", "") ?: ""
 
         val payload = "stream_type=Seek&channel_id=$channelId"
         
@@ -327,19 +327,25 @@ object JioTvRepo {
                 val code = parsed["code"]?.jsonPrimitive?.intOrNull
                 
                 if (code == 200) {
-                    val m3u8Url = parsed["result"]?.jsonPrimitive?.content ?: throw Exception("Empty manifest URL returned|500")
+                    val initialM3u8Url = parsed["result"]?.jsonPrimitive?.content ?: throw Exception("Empty manifest URL returned|500")
                     
-                    // PRE-PLAYBACK VERIFICATION
-                    // We must verify the manifest has chunks to prevent the PlayerActivity black screen
-                    val manifestReq = Request.Builder().url(m3u8Url)
-                        .header("User-Agent", JIO_USER_AGENT)
+                    // FIX BLACK SCREEN: The geturl API often returns a 302 redirect. 
+                    // MPV fails to pass the __hdnea__ cookie across redirects, resulting in a dropped connection.
+                    // We manually resolve the redirect chain here using the sessionCookie and return the final CDN URL.
+                    val redirectClient = client.newBuilder()
+                        .followRedirects(true)
+                        .followSslRedirects(true)
                         .build()
-                        
-                    client.newCall(manifestReq).execute().use { manifestRes ->
-                        val manifestBody = manifestRes.body?.string() ?: ""
-                        
-                        if (!manifestRes.isSuccessful) {
-                            val status = manifestRes.code
+
+                    val resolveReq = Request.Builder()
+                        .url(initialM3u8Url)
+                        .header("User-Agent", JIO_USER_AGENT)
+                        .header("Cookie", sessionCookie) 
+                        .build()
+
+                    redirectClient.newCall(resolveReq).execute().use { resolveRes ->
+                        if (!resolveRes.isSuccessful) {
+                            val status = resolveRes.code
                             val reason = when (status) {
                                 403 -> "Subscription Required / 403 Forbidden"
                                 401 -> "Token Expired / Unauthorized"
@@ -348,85 +354,20 @@ object JioTvRepo {
                             }
                             throw Exception("$reason|$status")
                         }
-
-                        if (!manifestBody.contains("#EXTM3U")) {
-                            if (manifestBody.contains("Subscription Required", true)) throw Exception("Subscription Required|403")
-                            if (manifestBody.contains("Geo Restricted", true)) throw Exception("Geo Restricted|403")
-                            throw Exception("Invalid Manifest Format|500")
-                        }
                         
-                        // If it's a master playlist, we extract the highest bandwidth chunklist to verify segments
-                        if (manifestBody.contains("#EXT-X-STREAM-INF")) {
-                            val lines = manifestBody.lines()
-                            val chunklistLine = lines.firstOrNull { it.endsWith(".m3u8") && !it.startsWith("#") }
-                            if (chunklistLine != null) {
-                                val chunklistUrl = if (chunklistLine.startsWith("http")) chunklistLine else {
-                                    val baseUrl = m3u8Url.substringBeforeLast("/")
-                                    "$baseUrl/$chunklistLine"
-                                }
-                                
-                                val chunkReq = Request.Builder().url(chunklistUrl).header("User-Agent", JIO_USER_AGENT).build()
-                                client.newCall(chunkReq).execute().use { chunkRes ->
-                                    val chunkBody = chunkRes.body?.string() ?: ""
-                                    if (!chunkRes.isSuccessful || !chunkBody.contains("#EXTINF")) {
-                                        throw Exception("Empty Playlist / No Segments|404")
-                                    }
-                                }
-                            }
-                        } else if (!manifestBody.contains("#EXTINF")) {
-                             throw Exception("Empty Playlist / No Segments|404")
-                        }
+                        val finalUrl = resolveRes.request.url.toString()
+                        Log.d("JioTvRepo", "Final Resolved URL: $finalUrl")
+                        return@withContext finalUrl
                     }
-                    
-                    // Note to developer: Ensure PlayerActivity passes JIO_USER_AGENT to MPV
-                    return@withContext m3u8Url
                 } else {
                     val msg = parsed["message"]?.jsonPrimitive?.content ?: "API Error"
                     throw Exception("$msg|$code")
                 }
             } catch (e: Exception) {
+                Log.e("JioTvRepo", "Stream Resolution Error", e)
                 throw e
             }
         }
-    }
-
-    suspend fun fetchEpgForChannel(channelId: String): EpgData? = withContext(Dispatchers.IO) {
-        try {
-            val req = Request.Builder().url("https://jiotv.data.cdn.jio.com/apis/v1.3/getepg/get?offset=0&channel_id=$channelId").build()
-            client.newCall(req).execute().use { res ->
-                val body = res.body?.string() ?: return@use null
-                val root = json.parseToJsonElement(body).jsonObject
-                val epgArray = root["epg"]?.jsonArray ?: return@use null
-                
-                val currentTime = System.currentTimeMillis()
-                var currentEpg: JsonObject? = null
-                var nextEpg: JsonObject? = null
-                
-                for (i in 0 until epgArray.size) {
-                    val prog = epgArray[i].jsonObject
-                    val st = prog["startTime"]?.jsonPrimitive?.longOrNull ?: continue
-                    val et = prog["endTime"]?.jsonPrimitive?.longOrNull ?: continue
-                    
-                    if (currentTime in st..et) {
-                        currentEpg = prog
-                        if (i + 1 < epgArray.size) nextEpg = epgArray[i + 1].jsonObject
-                        break
-                    }
-                }
-                
-                if (currentEpg != null) {
-                    return@use EpgData(
-                        programName = currentEpg["programName"]?.jsonPrimitive?.content ?: "Live TV",
-                        startTimeMs = currentEpg["startTime"]?.jsonPrimitive?.long ?: 0L,
-                        endTimeMs = currentEpg["endTime"]?.jsonPrimitive?.long ?: 0L,
-                        nextProgramName = nextEpg?.get("programName")?.jsonPrimitive?.content ?: "Upcoming Program",
-                        nextStartTimeMs = nextEpg?.get("startTime")?.jsonPrimitive?.long ?: 0L,
-                        description = currentEpg["description"]?.jsonPrimitive?.content ?: "Live TV Broadcast"
-                    )
-                }
-                null
-            }
-        } catch (e: Exception) { null }
     }
 
     suspend fun exportWorkingStreamsAsM3u(context: Context, channelsToTest: List<LiveChannelItem>) {
@@ -445,7 +386,6 @@ object JioTvRepo {
                 }
             }
             
-            // Trigger Share
             withContext(Dispatchers.Main) {
                 try {
                     val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", file)
