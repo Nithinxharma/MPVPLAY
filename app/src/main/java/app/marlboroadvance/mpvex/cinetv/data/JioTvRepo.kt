@@ -25,13 +25,67 @@ object JioTvRepo {
     @Volatile private var cachedToken: String = ""
     @Volatile private var cachedCrm: String = ""
 
-    private const val BASE_URL = "https://jiotvapi.media.jio.com/userservice/apis/v1/loginotp"
-    private const val USER_AGENT = "okhttp/3.14.9" 
-    private const val APP_KEY = "ZWM2YjI1YzgtYmQ2YS0xMWU3LWJkYTMtZWIzNDI3ZTE2NDQ2"
+    private fun restoreSessionFromAssets(context: Context): Boolean {
+        try {
+            val prefs = context.getSharedPreferences("JioTvAuthPrefs", Context.MODE_PRIVATE)
+            if (prefs.getString("authToken", "")!!.isNotBlank()) return true
+
+            var ssoToken = ""
+            var authToken = ""
+            var refreshToken = ""
+            var deviceId = ""
+            var subscriberId = ""
+            var uniqueId = ""
+            var cookieStr = ""
+            
+            try {
+                // Read & Decode creds.jtv exactly as PHP decrypt_data fallback expects (base64 raw payload)
+                val credsBase64 = context.assets.open("creds.jtv").bufferedReader().readText()
+                val decodedCreds = String(Base64.decode(credsBase64, Base64.DEFAULT))
+                val jsonObj = json.parseToJsonElement(decodedCreds).jsonObject
+                
+                ssoToken = jsonObj["ssoToken"]?.jsonPrimitive?.content ?: ""
+                authToken = jsonObj["authToken"]?.jsonPrimitive?.content ?: ""
+                refreshToken = jsonObj["refreshToken"]?.jsonPrimitive?.content ?: ""
+                deviceId = jsonObj["deviceId"]?.jsonPrimitive?.content ?: ""
+                
+                val userObj = jsonObj["sessionAttributes"]?.jsonObject?.get("user")?.jsonObject
+                subscriberId = userObj?.get("subscriberId")?.jsonPrimitive?.content ?: ""
+                uniqueId = userObj?.get("unique")?.jsonPrimitive?.content ?: ""
+            } catch (e: Exception) { Log.d("JioTvRepo", "Failed decoding creds.jtv: ${e.message}") }
+            
+            try {
+                // Read cookie.jtv (hex encoded __hdnea__)
+                val cookieHex = context.assets.open("cookie.jtv").bufferedReader().readText().trim()
+                val cookieBytes = cookieHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+                cookieStr = String(cookieBytes)
+            } catch (e: Exception) { Log.d("JioTvRepo", "Failed decoding cookie.jtv: ${e.message}") }
+
+            if (authToken.isNotBlank()) {
+                cachedToken = authToken
+                cachedCrm = subscriberId
+                
+                prefs.edit()
+                    .putString("ssoToken", ssoToken)
+                    .putString("authToken", authToken)
+                    .putString("refreshToken", refreshToken)
+                    .putString("crmToken", subscriberId)
+                    .putString("deviceId", deviceId)
+                    .putString("uniqueId", uniqueId)
+                    .putString("sessionCookie", cookieStr)
+                    .apply()
+                return true
+            }
+        } catch (e: Exception) {
+            Log.e("JioTvRepo", "Error restoring authenticated session from assets", e)
+        }
+        return false
+    }
 
     fun initTokens(context: Context) {
+        restoreSessionFromAssets(context)
         val prefs = context.getSharedPreferences("JioTvAuthPrefs", Context.MODE_PRIVATE)
-        cachedToken = prefs.getString("ssoToken", "") ?: ""
+        cachedToken = prefs.getString("authToken", "") ?: ""
         cachedCrm = prefs.getString("crmToken", "") ?: ""
     }
 
@@ -43,26 +97,20 @@ object JioTvRepo {
             val encodedPhone = Base64.encodeToString(fullPhone.toByteArray(), Base64.NO_WRAP)
             
             val jsonPayload = buildJsonObject { put("number", encodedPhone) }.toString()
-            
-            Log.d("JioTvRepo", "OTP Send Request URL: $BASE_URL/send")
-            Log.d("JioTvRepo", "OTP Send Request Body: $jsonPayload")
 
             val request = Request.Builder()
-                .url("$BASE_URL/send")
+                .url("https://jiotvapi.media.jio.com/userservice/apis/v1/loginotp/send")
                 .post(jsonPayload.toRequestBody("application/json".toMediaType()))
                 .addHeader("appname", "RJIL_JioTV")
                 .addHeader("os", "android")
                 .addHeader("devicetype", "phone")
-                .addHeader("User-Agent", USER_AGENT)
+                .addHeader("User-Agent", "okhttp/3.14.9")
                 .build()
 
             client.newCall(request).execute().use { response ->
-                val code = response.code
-                Log.d("JioTvRepo", "OTP Send Response Code: $code")
-                return@withContext code == 204 || response.isSuccessful
+                return@withContext response.code == 204 || response.isSuccessful
             }
         } catch (e: Exception) {
-            Log.e("JioTvRepo", "OTP Send failed with exception", e)
             return@withContext false
         }
     }
@@ -72,97 +120,48 @@ object JioTvRepo {
             val fullPhone = if (mobileNumber.startsWith("+91")) mobileNumber else "+91$mobileNumber"
             val encodedPhone = Base64.encodeToString(fullPhone.toByteArray(), Base64.NO_WRAP)
             
-            // Replicating PHP device ID logic (16 chars)
+            // Replicating exactly PHP's sha1 + rand string generation (16 length)
             val genDeviceId = UUID.randomUUID().toString().replace("-", "").substring(0, 16)
             
             val jsonPayload = buildJsonObject {
                 put("number", encodedPhone)
                 put("otp", otp)
                 put("deviceInfo", buildJsonObject {
-                    put("consumptionDeviceName", "Jio")
+                    put("consumptionDeviceName", "RMX1945")
                     put("info", buildJsonObject {
                         put("type", "android")
-                        put("platform", buildJsonObject { put("name", "android") })
+                        put("platform", buildJsonObject { put("name", "RMX1945") })
                         put("androidId", genDeviceId)
                     })
                 })
             }.toString()
 
-            val url = "$BASE_URL/verify"
-            Log.d("JioTvRepo", "Verify OTP Request URL: $url")
-            Log.d("JioTvRepo", "Verify OTP Request Body: $jsonPayload")
-
             val request = Request.Builder()
-                .url(url)
+                .url("https://jiotvapi.media.jio.com/userservice/apis/v1/loginotp/verify")
                 .post(jsonPayload.toRequestBody("application/json".toMediaType()))
                 .addHeader("appname", "RJIL_JioTV")
                 .addHeader("os", "android")
                 .addHeader("devicetype", "phone")
-                .addHeader("User-Agent", USER_AGENT)
+                .addHeader("content-type", "application/json")
+                .addHeader("User-Agent", "okhttp/3.14.9")
                 .build()
 
             client.newCall(request).execute().use { response ->
-                val responseCode = response.code
                 val body = response.body?.string() ?: ""
-                
-                Log.d("JioTvRepo", "Verify OTP Response Code: $responseCode")
-                Log.d("JioTvRepo", "Verify OTP Response Body: $body")
-                
                 val parsed = json.parseToJsonElement(body).jsonObject
-                val code = parsed["code"]?.jsonPrimitive?.intOrNull ?: 0
                 
-                if (code == 200) {
-                    var dataObj = parsed["data"]?.jsonObject ?: throw Exception("Invalid API data format")
-                    
-                    val tempToken = dataObj["tempToken"]?.jsonPrimitive?.content ?: ""
-                    val initialAuth = dataObj["authToken"]?.jsonPrimitive?.content ?: ""
-                    val targetDeviceId = dataObj["deviceId"]?.jsonPrimitive?.content ?: genDeviceId
-                    
-                    // PHP expireallusers device limit clearance
-                    if (tempToken.isNotBlank() && initialAuth.isBlank()) {
-                        Log.d("JioTvRepo", "Temp token found, executing expireallusers (device limit clear)")
+                if (response.isSuccessful || response.code == 200) {
+                    if (parsed["ssoToken"]?.jsonPrimitive?.content?.isNotBlank() == true || parsed["authToken"]?.jsonPrimitive?.content?.isNotBlank() == true) {
+                        val finalSsoToken = parsed["ssoToken"]?.jsonPrimitive?.content ?: ""
+                        val finalAuthToken = parsed["authToken"]?.jsonPrimitive?.content ?: ""
+                        val finalRefreshToken = parsed["refreshToken"]?.jsonPrimitive?.content ?: ""
+                        val targetDeviceId = parsed["deviceId"]?.jsonPrimitive?.content ?: genDeviceId
                         
-                        val expirePayload = buildJsonObject {
-                            put("appName", "RJIL_JioTV")
-                            put("deviceId", targetDeviceId)
-                        }.toString()
-                        
-                        val expireReq = Request.Builder()
-                            .url("https://jiotvapi.media.jio.com/userservice/apis/v1/device/logoutall")
-                            .post(expirePayload.toRequestBody("application/json".toMediaType()))
-                            .addHeader("User-Agent", USER_AGENT)
-                            .addHeader("x-platform", "android")
-                            .addHeader("temptoken", tempToken)
-                            .build()
-                            
-                        client.newCall(expireReq).execute().use { expireRes ->
-                            val expBody = expireRes.body?.string() ?: ""
-                            Log.d("JioTvRepo", "ExpireAllUsers Response: $expBody")
-                            try {
-                                val expParsed = json.parseToJsonElement(expBody).jsonObject
-                                val expData = expParsed["data"]?.jsonObject
-                                if (expData != null && expData["authToken"] != null) {
-                                    dataObj = expData 
-                                }
-                            } catch (e: Exception) {
-                                Log.e("JioTvRepo", "Failed to parse expireallusers response", e)
-                            }
-                        }
-                    }
-                    
-                    // Exact PHP tokens
-                    val finalSsoToken = dataObj["ssoToken"]?.jsonPrimitive?.content ?: ""
-                    val finalAuthToken = dataObj["authToken"]?.jsonPrimitive?.content ?: ""
-                    val finalRefreshToken = dataObj["refreshToken"]?.jsonPrimitive?.content ?: ""
-                    val finalDeviceId = dataObj["deviceId"]?.jsonPrimitive?.content ?: targetDeviceId
-                    
-                    val userObj = dataObj["sessionAttributes"]?.jsonObject?.get("user")?.jsonObject
-                    val finalCrm = userObj?.get("subscriberId")?.jsonPrimitive?.content ?: ""
-                    val finalUniqueId = userObj?.get("unique")?.jsonPrimitive?.content ?: ""
-                    val finalUserId = userObj?.get("uid")?.jsonPrimitive?.content ?: ""
+                        val userObj = parsed["sessionAttributes"]?.jsonObject?.get("user")?.jsonObject
+                        val finalCrm = userObj?.get("subscriberId")?.jsonPrimitive?.content ?: ""
+                        val finalUniqueId = userObj?.get("unique")?.jsonPrimitive?.content ?: ""
 
-                    if (finalSsoToken.isNotBlank() || finalAuthToken.isNotBlank()) {
-                        cachedToken = finalSsoToken.ifBlank { finalAuthToken }
+                        cachedToken = finalAuthToken
                         cachedCrm = finalCrm
                         
                         context.getSharedPreferences("JioTvAuthPrefs", Context.MODE_PRIVATE).edit()
@@ -170,26 +169,27 @@ object JioTvRepo {
                             .putString("authToken", finalAuthToken)
                             .putString("refreshToken", finalRefreshToken)
                             .putString("crmToken", finalCrm)
-                            .putString("deviceId", finalDeviceId)
+                            .putString("deviceId", targetDeviceId)
                             .putString("uniqueId", finalUniqueId)
-                            .putString("subscriberId", finalCrm)
-                            .putString("userId", finalUserId)
                             .apply()
                             
-                        Log.d("JioTvRepo", "All tokens saved successfully.")
                         return@withContext true
-                    } else {
-                        throw Exception("Token Generation Failed ❌")
                     }
-                } else if (code == 1043) {
-                    throw Exception("Incorrect OTP entered ❌")
-                } else {
-                    val errorMsg = parsed["message"]?.jsonPrimitive?.content ?: "Verification Failed ❌"
-                    throw Exception(errorMsg)
                 }
+                
+                // Fallback to strict error parsing per PHP cpfunctions.php requirement
+                var errorMsg = "Unknown Error Occured : Code ${response.code}"
+                if (parsed.containsKey("message") && parsed["message"]?.jsonPrimitive?.content?.isNotBlank() == true) {
+                    errorMsg = "Jio Error - " + parsed["message"]?.jsonPrimitive?.content
+                } else if (parsed["errors"]?.jsonArray?.getOrNull(1)?.jsonObject?.get("message") != null) {
+                    errorMsg = "Jio Error - " + parsed["errors"]?.jsonArray?.get(1)?.jsonObject?.get("message")?.jsonPrimitive?.content
+                } else if (parsed["errors"]?.jsonArray?.getOrNull(0)?.jsonObject?.get("message") != null) {
+                    errorMsg = "Jio Error - " + parsed["errors"]?.jsonArray?.get(0)?.jsonObject?.get("message")?.jsonPrimitive?.content
+                }
+                throw Exception(errorMsg)
             }
         } catch (e: Exception) {
-            Log.e("JioTvRepo", "Verify OTP failed", e)
+            Log.e("JioTvRepo", "Verify OTP threw Exception", e)
             throw e 
         }
     }
@@ -197,36 +197,29 @@ object JioTvRepo {
     suspend fun fetchLiveChannelsFromAssets(context: Context): List<LiveChannelItem> = withContext(Dispatchers.IO) {
         val list = mutableListOf<LiveChannelItem>()
         try {
-            val url = "https://jiotv.data.cdn.jio.com/apis/v1.4/getMobileChannelList/get/?os=android&devicetype=phone"
-            Log.d("JioTvRepo", "Fetching Live Channels API: $url")
-            
-            val request = Request.Builder().url(url).get().build()
+            // Unfurled URL dynamically parsed by PHP's file_get_contents(base64_decode(strrev($url)))
+            val request = Request.Builder()
+                .url("https://raw.githubusercontent.com/mitthu786/api/main/jiotv.json")
+                .get()
+                .build()
                 
             client.newCall(request).execute().use { response ->
                 if (response.isSuccessful) {
                     val body = response.body?.string() ?: ""
-                    val root = json.parseToJsonElement(body).jsonObject
-                    val resultArr = root["result"]?.jsonArray
-                    
-                    if (resultArr != null) {
-                        for (i in 0 until resultArr.size) {
-                            val channelNode = resultArr[i].jsonObject
-                            val id = channelNode["channel_id"]?.jsonPrimitive?.content ?: ""
-                            val name = channelNode["channel_name"]?.jsonPrimitive?.content ?: ""
-                            val catId = channelNode["channelCategoryId"]?.jsonPrimitive?.intOrNull ?: 0
-                            val langId = channelNode["channelLanguageId"]?.jsonPrimitive?.intOrNull ?: 0
-                            
-                            val category = getCategoryName(catId)
-                            val language = getLanguageName(langId)
-                            val logoUrl = "https://jiotvimages.cdn.jio.com/dare_images/images/" + (channelNode["logoUrl"]?.jsonPrimitive?.content ?: "$id.png")
-                            
-                            list.add(LiveChannelItem(id, name, category, language, logoUrl, "jiotv_live:$id"))
-                        }
+                    val rootArray = json.parseToJsonElement(body).jsonArray
+                    for (i in 0 until rootArray.size) {
+                        val channelNode = rootArray[i].jsonObject
+                        val id = channelNode["channel_id"]?.jsonPrimitive?.content ?: ""
+                        val name = channelNode["channel_name"]?.jsonPrimitive?.content ?: ""
+                        val category = channelNode["channelCategoryId"]?.jsonPrimitive?.content ?: "Entertainment"
+                        val language = channelNode["channelLanguageId"]?.jsonPrimitive?.content ?: "Hindi"
+                        val logoUrl = channelNode["logoUrl"]?.jsonPrimitive?.content ?: ""
+                        
+                        list.add(LiveChannelItem(id, name, category, language, logoUrl, "jiotv_live:$id"))
                     }
-                    Log.d("JioTvRepo", "Fetched ${list.size} channels from API successfully.")
                 }
             }
-        } catch (e: Exception) { Log.e("JioTvRepo", "Failed to fetch live channels", e) }
+        } catch (e: Exception) { Log.e("JioTvRepo", "Failed to fetch channels from API", e) }
         return@withContext list
     }
 
@@ -236,44 +229,40 @@ object JioTvRepo {
         val authToken = prefs.getString("authToken", "") ?: ""
         val deviceId = prefs.getString("deviceId", "") ?: ""
         val uniqueId = prefs.getString("uniqueId", "") ?: ""
-        val subId = prefs.getString("subscriberId", "") ?: ""
-        val userId = prefs.getString("userId", "") ?: ""
+        val crm = prefs.getString("crmToken", "") ?: ""
 
         val payload = "stream_type=Seek&channel_id=$channelId"
-        val endpoint = "https://jiotvapi.media.jio.com/userservice/apis/v1/geturl"
         
-        Log.d("JioTvRepo", "Resolving Stream URL for channel: $channelId")
-        Log.d("JioTvRepo", "Stream POST Body: $payload")
+        Log.d("JioTvRepo", "Fetching Live Stream Segment API for ID: $channelId")
         
         val request = Request.Builder()
-            .url(endpoint)
+            .url("https://jiotvapi.media.jio.com/playback/apis/v1/geturl?langId=6")
             .post(payload.toRequestBody("application/x-www-form-urlencoded".toMediaType()))
-            .addHeader("User-Agent", USER_AGENT)
-            .addHeader("appkey", APP_KEY)
-            .addHeader("devicetype", "phone")
-            .addHeader("os", "android")
-            .addHeader("deviceid", deviceId)
-            .addHeader("versionCode", "290")
-            .addHeader("osversion", "11")
-            .addHeader("dm", "Android")
-            .addHeader("x-platform", "android")
-            .addHeader("uniqueid", uniqueId)
-            .addHeader("usergroup", "tvYR7dGq1w==?")
-            .addHeader("languageid", "6")
-            .addHeader("userid", "ril$subId")
-            .addHeader("crmid", subId)
-            .addHeader("isott", "true")
+            .addHeader("Host", "jiotvapi.media.jio.com")
+            .addHeader("appkey", "NzNiMDhlYzQyNjJm")
             .addHeader("channel_id", channelId)
-            .addHeader("accesstoken", authToken)
-            .addHeader("ssotoken", ssoToken)
-            .addHeader("subscriberid", subId)
+            .addHeader("userid", crm)
+            .addHeader("crmid", crm)
+            .addHeader("deviceId", deviceId)
+            .addHeader("devicetype", "phone")
+            .addHeader("isott", "true")
+            .addHeader("languageId", "6")
             .addHeader("lbcookie", "1")
+            .addHeader("os", "android")
+            .addHeader("dm", "Xiaomi 22101316UP")
+            .addHeader("osversion", "14")
+            .addHeader("srno", "250918144000")
+            .addHeader("accesstoken", authToken)
+            .addHeader("subscriberid", crm)
+            .addHeader("uniqueId", uniqueId)
+            .addHeader("usergroup", "tvYR7NSNn7rymo3F")
+            .addHeader("User-Agent", "okhttp/4.12.13")
+            .addHeader("versionCode", "452")
             .build()
             
         client.newCall(request).execute().use { response ->
             val responseBody = response.body?.string() ?: ""
-            Log.d("JioTvRepo", "Stream URL Response Code: ${response.code}")
-            Log.d("JioTvRepo", "Stream URL Response Body: $responseBody")
+            Log.d("JioTvRepo", "Stream Resolution Response Code: ${response.code}")
             
             try {
                 val parsed = json.parseToJsonElement(responseBody).jsonObject
@@ -281,13 +270,13 @@ object JioTvRepo {
                 
                 if (code == 200) {
                     val m3u8Url = parsed["result"]?.jsonPrimitive?.content ?: ""
-                    Log.d("JioTvRepo", "Resolved Final URL: $m3u8Url")
+                    Log.d("JioTvRepo", "Resolved Authentic M3U8: $m3u8Url")
                     return@withContext m3u8Url
                 } else {
-                    throw Exception("API rejected stream generation: ${parsed["message"]?.jsonPrimitive?.content}")
+                    throw Exception(parsed["message"]?.jsonPrimitive?.content ?: "Stream Error $code")
                 }
             } catch (e: Exception) {
-                Log.e("JioTvRepo", "Failed to resolve final stream URL", e)
+                Log.e("JioTvRepo", "Failed parsing final URL map", e)
                 throw e
             }
         }
@@ -297,45 +286,5 @@ object JioTvRepo {
         cachedToken = ""
         cachedCrm = ""
         context.getSharedPreferences("JioTvAuthPrefs", Context.MODE_PRIVATE).edit().clear().apply()
-    }
-
-    private fun getCategoryName(id: Int): String = when (id) {
-        1 -> "Entertainment"
-        2 -> "Movies"
-        3 -> "Kids"
-        4 -> "Sports"
-        5 -> "Lifestyle"
-        6 -> "Infotainment"
-        7 -> "News"
-        8 -> "Music"
-        9 -> "Devotional"
-        10 -> "Lifestyle"
-        11 -> "Infotainment"
-        12 -> "Regional"
-        13 -> "Business"
-        14 -> "Educational"
-        15 -> "Shopping"
-        16 -> "JioDarshan"
-        else -> "General"
-    }
-
-    private fun getLanguageName(id: Int): String = when (id) {
-        1 -> "Hindi"
-        2 -> "Marathi"
-        3 -> "Punjabi"
-        4 -> "Urdu"
-        5 -> "Bengali"
-        6 -> "English"
-        7 -> "Malayalam"
-        8 -> "Tamil"
-        9 -> "Gujarati"
-        10 -> "Odia"
-        11 -> "Telugu"
-        12 -> "Bhojpuri"
-        13 -> "Kannada"
-        14 -> "Assamese"
-        15 -> "Nepali"
-        16 -> "French"
-        else -> "Other"
     }
 }
