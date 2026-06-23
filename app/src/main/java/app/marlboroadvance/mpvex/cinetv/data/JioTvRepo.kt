@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.util.Base64
 import android.util.Log
+import android.widget.Toast
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -16,8 +17,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
 import java.util.concurrent.TimeUnit
 import java.util.UUID
-import app.marlboroadvance.mpvex.cinetv.model.LiveChannelItem
-import app.marlboroadvance.mpvex.cinetv.model.ChannelVariant
+import app.marlboroadvance.mpvex.cinetv.model.*
 
 object JioTvRepo {
     val client = OkHttpClient.Builder()
@@ -27,6 +27,12 @@ object JioTvRepo {
         .followSslRedirects(true)
         .build()
 
+    // Aggressive fast client for validating M3U fallbacks without hanging the UI
+    private val quickClient = client.newBuilder()
+        .connectTimeout(4, TimeUnit.SECONDS)
+        .readTimeout(4, TimeUnit.SECONDS)
+        .build()
+
     private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
     
     @Volatile private var cachedToken: String = ""
@@ -34,6 +40,141 @@ object JioTvRepo {
 
     private const val JIO_USER_AGENT = "plaYtv/7.0.8 (Linux;Android 9) ExoPlayerLib/2.11.7"
 
+    // --- SMART CACHE / DATABASE ---
+    fun getChannelCacheMap(context: Context): MutableMap<String, ChannelCacheEntry> {
+        val prefs = context.getSharedPreferences("JioTvSmartCache", Context.MODE_PRIVATE)
+        val map = mutableMapOf<String, ChannelCacheEntry>()
+        try {
+            val jsonStr = prefs.getString("cache", "{}") ?: "{}"
+            val root = json.parseToJsonElement(jsonStr).jsonObject
+            for ((k, v) in root) {
+                val obj = v.jsonObject
+                val source = if (obj["preferredSource"]?.jsonPrimitive?.content == "M3U") PlaybackSource.M3U else PlaybackSource.JIO_TV
+                map[k] = ChannelCacheEntry(
+                    channelId = k,
+                    normalizedName = obj["normalizedName"]?.jsonPrimitive?.content ?: "",
+                    preferredSource = source,
+                    lastSuccessfulUrl = obj["lastSuccessfulUrl"]?.jsonPrimitive?.content,
+                    lastTestedTime = obj["lastTestedTime"]?.jsonPrimitive?.long ?: 0L,
+                    failureCount = obj["failureCount"]?.jsonPrimitive?.int ?: 0,
+                    successCount = obj["successCount"]?.jsonPrimitive?.int ?: 0,
+                    userFeedback = obj["userFeedback"]?.jsonPrimitive?.booleanOrNull
+                )
+            }
+        } catch (e: Exception) {}
+        return map
+    }
+
+    private fun saveChannelCache(context: Context, entry: ChannelCacheEntry) {
+        val cache = getChannelCacheMap(context)
+        cache[entry.channelId] = entry
+        val prefs = context.getSharedPreferences("JioTvSmartCache", Context.MODE_PRIVATE)
+        
+        val rootObj = buildJsonObject {
+            cache.forEach { (k, v) ->
+                put(k, buildJsonObject {
+                    put("channelId", v.channelId)
+                    put("normalizedName", v.normalizedName)
+                    put("preferredSource", v.preferredSource.name)
+                    if (v.lastSuccessfulUrl != null) put("lastSuccessfulUrl", v.lastSuccessfulUrl)
+                    put("lastTestedTime", v.lastTestedTime)
+                    put("failureCount", v.failureCount)
+                    put("successCount", v.successCount)
+                    if (v.userFeedback != null) put("userFeedback", v.userFeedback)
+                })
+            }
+        }
+        prefs.edit().putString("cache", rootObj.toString()).apply()
+    }
+
+    fun setUserFeedback(context: Context, channelId: String, worked: Boolean) {
+        val cache = getChannelCacheMap(context)
+        val entry = cache[channelId]
+        if (entry != null) {
+            entry.userFeedback = worked
+            // If the M3U fallback failed the user, reset preference back to JioTV to retry source switching next time
+            if (!worked && entry.preferredSource == PlaybackSource.M3U) {
+                entry.preferredSource = PlaybackSource.JIO_TV 
+            }
+            saveChannelCache(context, entry)
+        }
+    }
+
+    // --- M3U FALLBACK ENGINE ---
+    private data class M3uEntry(val name: String, val normalizedName: String, val url: String, val qualityScore: Int)
+    private var cachedM3uEntries: List<M3uEntry>? = null
+
+    private fun normalizeName(name: String): String {
+        return name.replace(Regex("(?i)\\b(HD|SD|4K|UHD)\\b"), "")
+            .replace("+", "")
+            .replace("-", "")
+            .replace("_", "")
+            .replace(" ", "")
+            .lowercase()
+            .trim()
+    }
+
+    private fun loadM3uFallback(context: Context): List<M3uEntry> {
+        if (cachedM3uEntries != null) return cachedM3uEntries!!
+        val entries = mutableListOf<M3uEntry>()
+        try {
+            val lines = context.assets.open("in.m3u").bufferedReader().readLines()
+            var currentName = ""
+            for (line in lines) {
+                val trimmed = line.trim()
+                if (trimmed.startsWith("#EXTINF")) {
+                    currentName = trimmed.substringAfterLast(",").trim()
+                } else if (trimmed.startsWith("http")) {
+                    val score = when {
+                        trimmed.contains("1080") || currentName.contains("1080") -> 3
+                        trimmed.contains("720") || currentName.contains("HD", true) -> 2
+                        else -> 1
+                    }
+                    entries.add(M3uEntry(currentName, normalizeName(currentName), trimmed, score))
+                }
+            }
+        } catch (e: Exception) { Log.e("JioTvRepo", "Failed to parse in.m3u", e) }
+        cachedM3uEntries = entries
+        return entries
+    }
+
+    private fun testM3uStream(url: String): Boolean {
+        try {
+            val req = Request.Builder().url(url).head().build()
+            quickClient.newCall(req).execute().use { res ->
+                if (res.isSuccessful) return true
+                if (res.code == 405) { // Some servers block HEAD
+                    val getReq = Request.Builder().url(url).build()
+                    quickClient.newCall(getReq).execute().use { getRes -> return getRes.isSuccessful }
+                }
+                return false
+            }
+        } catch(e: Exception) { return false }
+    }
+
+    private fun getWorkingM3uStream(context: Context, channelName: String): String? {
+        val target = normalizeName(channelName)
+        if (target.isBlank()) return null
+        
+        val entries = loadM3uFallback(context)
+        
+        // Tier 1: Exact normalized match
+        var matches = entries.filter { it.normalizedName == target }
+        
+        // Tier 2: Fuzzy contains match
+        if (matches.isEmpty() && target.length > 3) {
+            matches = entries.filter { it.normalizedName.contains(target) || target.contains(it.normalizedName) }
+        }
+        
+        matches = matches.sortedByDescending { it.qualityScore }
+        
+        for (entry in matches) {
+            if (testM3uStream(entry.url)) return entry.url
+        }
+        return null
+    }
+
+    // --- AUTH & LOGIN ---
     private fun restoreSessionFromAssets(context: Context): Boolean {
         try {
             val prefs = context.getSharedPreferences("JioTvAuthPrefs", Context.MODE_PRIVATE)
@@ -283,132 +424,144 @@ object JioTvRepo {
 
     private data class RawChannel(val id: String, val name: String, val category: String, val language: String, val logoUrl: String)
 
-    suspend fun getResolvedLiveUrl(context: Context, channelId: String, channelName: String = "Unknown"): String = withContext(Dispatchers.IO) {
-        try {
-            val prefs = context.getSharedPreferences("JioTvAuthPrefs", Context.MODE_PRIVATE)
-            val ssoToken = prefs.getString("ssoToken", "") ?: ""
-            val authToken = prefs.getString("authToken", "") ?: ""
-            val deviceId = prefs.getString("deviceId", "") ?: ""
-            val uniqueId = prefs.getString("uniqueId", "") ?: ""
-            val crm = prefs.getString("crmToken", "") ?: ""
-            val sessionCookie = prefs.getString("sessionCookie", "") ?: ""
+    // Primary Resolution API that encapsulates Both Sources
+    suspend fun getResolvedLiveUrl(context: Context, channelId: String, channelName: String = "Unknown"): ResolvedStream = withContext(Dispatchers.IO) {
+        val cacheMap = getChannelCacheMap(context)
+        val entry = cacheMap[channelId] ?: ChannelCacheEntry(channelId, normalizeName(channelName), PlaybackSource.JIO_TV)
+        
+        // 1. SMART CACHE CHECK (Occasionally revalidate JioTV in background if M3U was preferred)
+        val isM3uPreferred = entry.preferredSource == PlaybackSource.M3U && entry.userFeedback != false
+        val timeSinceTest = System.currentTimeMillis() - entry.lastTestedTime
 
-            // stream_type=Live ensures pure live HLS manifests are retrieved instead of 404 Catch-up manifests
-            val payload = "stream_type=Live&channel_id=$channelId"
-            
-            val request = Request.Builder()
-                .url("https://jiotvapi.media.jio.com/playback/apis/v1/geturl?langId=6")
-                .post(payload.toRequestBody("application/x-www-form-urlencoded".toMediaType()))
-                .addHeader("Host", "jiotvapi.media.jio.com")
-                .addHeader("appkey", "NzNiMDhlYzQyNjJm")
-                .addHeader("channel_id", channelId)
-                .addHeader("userid", crm)
-                .addHeader("crmid", crm)
-                .addHeader("deviceId", deviceId)
-                .addHeader("devicetype", "phone")
-                .addHeader("isott", "true")
-                .addHeader("languageId", "6")
-                .addHeader("lbcookie", "1")
-                .addHeader("os", "android")
-                .addHeader("dm", "Xiaomi 22101316UP")
-                .addHeader("osversion", "14")
-                .addHeader("srno", "250918144000")
-                .addHeader("accesstoken", authToken)
-                .addHeader("subscriberid", crm)
-                .addHeader("uniqueId", uniqueId)
-                .addHeader("usergroup", "tvYR7NSNn7rymo3F")
-                .addHeader("User-Agent", "okhttp/4.12.13")
-                .addHeader("versionCode", "452")
-                .build()
-                
-            client.newCall(request).execute().use { response ->
-                val responseBody = response.body?.string() ?: ""
-                
-                val parsed = json.parseToJsonElement(responseBody).jsonObject
-                val code = parsed["code"]?.jsonPrimitive?.intOrNull ?: response.code
-                
-                if (code == 200) {
-                    val initialM3u8Url = parsed["result"]?.jsonPrimitive?.content ?: throw Exception("Empty manifest URL returned|500")
-                    
-                    // We manually resolve the redirect chain here using the sessionCookie and return the final CDN URL.
-                    // This prevents black screen disconnects in PlayerActivity due to missing Cookies during Edge 302 jumps.
-                    val redirectClient = client.newBuilder()
-                        .followRedirects(true)
-                        .followSslRedirects(true)
-                        .build()
-
-                    val resolveReq = Request.Builder()
-                        .url(initialM3u8Url)
-                        .header("User-Agent", JIO_USER_AGENT)
-                        .header("Cookie", sessionCookie) 
-                        .build()
-
-                    redirectClient.newCall(resolveReq).execute().use { resolveRes ->
-                        val status = resolveRes.code
-                        val headersStr = resolveRes.headers.toString().replace("\n", ", ")
-                        var finalUrl = resolveRes.request.url.toString()
-
-                        // Append cookie directly into URL query so players without custom header support can validate properly
-                        if (sessionCookie.isNotBlank() && !finalUrl.contains("__hdnea__")) {
-                            val cookieParam = sessionCookie.trim()
-                            finalUrl += if (finalUrl.contains("?")) "&" else "?"
-                            finalUrl += cookieParam
-                        }
-
-                        if (!resolveRes.isSuccessful) {
-                            val reason = when (status) {
-                                403 -> "Subscription Required / 403 Forbidden"
-                                401 -> "Token Expired / Unauthorized"
-                                404 -> "Stream Offline / 404"
-                                500 -> "Internal Server Error"
-                                else -> "Manifest Request Failed"
-                            }
-
-                            Log.e("JioTvPlayback", """
-                                |--- PLAYBACK FAILED ---
-                                |Channel Name: $channelName
-                                |Original URL: $initialM3u8Url
-                                |Final URL: $finalUrl
-                                |HTTP Status: $status
-                                |Cookies: $sessionCookie
-                                |Headers: $headersStr
-                                |Failure reason: $reason
-                                |-----------------------
-                            """.trimMargin())
-
-                            throw Exception("$reason|$status")
-                        }
-                        
-                        Log.i("JioTvPlayback", """
-                            |--- PLAYBACK SUCCESS ---
-                            |Channel Name: $channelName
-                            |Original URL: $initialM3u8Url
-                            |Final URL after redirects: $finalUrl
-                            |HTTP Status: $status
-                            |Cookies: $sessionCookie
-                            |Headers: $headersStr
-                            |------------------------
-                        """.trimMargin())
-
-                        return@withContext finalUrl
-                    }
-                } else {
-                    val msg = parsed["message"]?.jsonPrimitive?.content ?: "API Error"
-                    
-                    // Specific handler for paywall errors to prevent generic crashes
-                    if (msg.contains("No eligible plans", ignoreCase = true) || code == 3012) {
-                        throw Exception("No eligible plans found (3012)|3012")
-                    }
-                    if (msg.contains("Subscription Required", ignoreCase = true) || code == 403) {
-                        throw Exception("Subscription Required (403)|403")
-                    }
-                    
-                    throw Exception("$msg|$code")
-                }
+        if (isM3uPreferred && timeSinceTest < 14400000L) { // 4 Hours wait before attempting JioTV recovery
+            val m3uUrl = getWorkingM3uStream(context, channelName)
+            if (m3uUrl != null) {
+                entry.lastSuccessfulUrl = m3uUrl
+                entry.lastTestedTime = System.currentTimeMillis()
+                saveChannelCache(context, entry)
+                return@withContext ResolvedStream(m3uUrl, PlaybackSource.M3U)
+            } else {
+                entry.preferredSource = PlaybackSource.JIO_TV // Expired M3U stream -> Reset
             }
+        }
+
+        // 2. PRIMARY JIOTV IMPLEMENTATION
+        try {
+            val jioUrl = resolveOriginalJioTvStream(context, channelId, channelName)
+            
+            entry.preferredSource = PlaybackSource.JIO_TV
+            entry.lastSuccessfulUrl = jioUrl
+            entry.lastTestedTime = System.currentTimeMillis()
+            entry.successCount++
+            saveChannelCache(context, entry)
+            
+            return@withContext ResolvedStream(jioUrl, PlaybackSource.JIO_TV)
         } catch (e: Exception) {
-            Log.e("JioTvPlayback", "Exception during playback resolution for $channelName: ${e.message}", e)
-            throw e
+            entry.failureCount++
+            saveChannelCache(context, entry)
+
+            // Notify UI silently before starting the search
+            withContext(Dispatchers.Main) {
+                Toast.makeText(context, "JioTV unavailable. Searching fallback streams...", Toast.LENGTH_SHORT).show()
+            }
+
+            // 3. FALLBACK M3U IMPLEMENTATION
+            val m3uUrl = getWorkingM3uStream(context, channelName)
+            if (m3uUrl != null) {
+                entry.preferredSource = PlaybackSource.M3U
+                entry.lastSuccessfulUrl = m3uUrl
+                entry.lastTestedTime = System.currentTimeMillis()
+                saveChannelCache(context, entry)
+                return@withContext ResolvedStream(m3uUrl, PlaybackSource.M3U)
+            } else {
+                // If both fail, throw the original JioTV error
+                throw e
+            }
+        }
+    }
+
+    private suspend fun resolveOriginalJioTvStream(context: Context, channelId: String, channelName: String): String {
+        val prefs = context.getSharedPreferences("JioTvAuthPrefs", Context.MODE_PRIVATE)
+        val ssoToken = prefs.getString("ssoToken", "") ?: ""
+        val authToken = prefs.getString("authToken", "") ?: ""
+        val deviceId = prefs.getString("deviceId", "") ?: ""
+        val uniqueId = prefs.getString("uniqueId", "") ?: ""
+        val crm = prefs.getString("crmToken", "") ?: ""
+        val sessionCookie = prefs.getString("sessionCookie", "") ?: ""
+
+        val payload = "stream_type=Live&channel_id=$channelId"
+        
+        val request = Request.Builder()
+            .url("https://jiotvapi.media.jio.com/playback/apis/v1/geturl?langId=6")
+            .post(payload.toRequestBody("application/x-www-form-urlencoded".toMediaType()))
+            .addHeader("Host", "jiotvapi.media.jio.com")
+            .addHeader("appkey", "NzNiMDhlYzQyNjJm")
+            .addHeader("channel_id", channelId)
+            .addHeader("userid", crm)
+            .addHeader("crmid", crm)
+            .addHeader("deviceId", deviceId)
+            .addHeader("devicetype", "phone")
+            .addHeader("isott", "true")
+            .addHeader("languageId", "6")
+            .addHeader("lbcookie", "1")
+            .addHeader("os", "android")
+            .addHeader("dm", "Xiaomi 22101316UP")
+            .addHeader("osversion", "14")
+            .addHeader("srno", "250918144000")
+            .addHeader("accesstoken", authToken)
+            .addHeader("subscriberid", crm)
+            .addHeader("uniqueId", uniqueId)
+            .addHeader("usergroup", "tvYR7NSNn7rymo3F")
+            .addHeader("User-Agent", "okhttp/4.12.13")
+            .addHeader("versionCode", "452")
+            .build()
+            
+        client.newCall(request).execute().use { response ->
+            val responseBody = response.body?.string() ?: ""
+            val parsed = json.parseToJsonElement(responseBody).jsonObject
+            val code = parsed["code"]?.jsonPrimitive?.intOrNull ?: response.code
+            
+            if (code == 200) {
+                val initialM3u8Url = parsed["result"]?.jsonPrimitive?.content ?: throw Exception("Empty manifest URL returned|500")
+                val redirectClient = client.newBuilder().followRedirects(true).followSslRedirects(true).build()
+
+                val resolveReq = Request.Builder()
+                    .url(initialM3u8Url)
+                    .header("User-Agent", JIO_USER_AGENT)
+                    .header("Cookie", sessionCookie) 
+                    .build()
+
+                redirectClient.newCall(resolveReq).execute().use { resolveRes ->
+                    val status = resolveRes.code
+                    var finalUrl = resolveRes.request.url.toString()
+
+                    if (sessionCookie.isNotBlank() && !finalUrl.contains("__hdnea__")) {
+                        finalUrl += if (finalUrl.contains("?")) "&" else "?"
+                        finalUrl += sessionCookie.trim()
+                    }
+
+                    if (!resolveRes.isSuccessful) {
+                        val reason = when (status) {
+                            403 -> "Subscription Required / 403 Forbidden"
+                            401 -> "Token Expired / Unauthorized"
+                            404 -> "Stream Offline / 404"
+                            500 -> "Internal Server Error"
+                            else -> "Manifest Request Failed"
+                        }
+                        throw Exception("$reason|$status")
+                    }
+                    return finalUrl
+                }
+            } else {
+                val msg = parsed["message"]?.jsonPrimitive?.content ?: "API Error"
+                if (msg.contains("No eligible plans", ignoreCase = true) || code == 3012) {
+                    throw Exception("No eligible plans found (3012)|3012")
+                }
+                if (msg.contains("Subscription Required", ignoreCase = true) || code == 403) {
+                    throw Exception("Subscription Required (403)|403")
+                }
+                throw Exception("$msg|$code")
+            }
         }
     }
 
@@ -419,7 +572,7 @@ object JioTvRepo {
                 out.write("#EXTM3U\n")
                 for (channel in channelsToTest) {
                     try {
-                        val m3u8 = getResolvedLiveUrl(context, channel.defaultChannelId, channel.title)
+                        val m3u8 = getResolvedLiveUrl(context, channel.defaultChannelId, channel.title).url
                         out.write("#EXTINF:-1 tvg-id=\"${channel.defaultChannelId}\" tvg-logo=\"${channel.logoUrl}\" group-title=\"${channel.category}\",${channel.title}\n")
                         out.write("$m3u8\n")
                     } catch (e: Exception) {
