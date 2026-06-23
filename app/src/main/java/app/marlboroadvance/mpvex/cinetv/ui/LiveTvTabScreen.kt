@@ -142,8 +142,8 @@ fun LiveTvTabScreen(
                     }
                 }
 
-                // M3 Language Dropdown
-                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, bottom = 8.dp)) {
+                // M3 Language Dropdown - FIXED PADDING HERE
+                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 8.dp)) {
                     ExposedDropdownMenuBox(expanded = languageExpanded, onExpandedChange = { languageExpanded = it }, modifier = Modifier.fillMaxWidth()) {
                         OutlinedTextField(
                             value = selectedLanguage, onValueChange = {}, readOnly = true,
