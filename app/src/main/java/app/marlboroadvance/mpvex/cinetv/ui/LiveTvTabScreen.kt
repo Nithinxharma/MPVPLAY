@@ -340,3 +340,112 @@ fun LiveTvTabScreen(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun LiveChannelRowItem(
+    channel: LiveChannelItem, 
+    preSelectedLanguage: String,
+    onPlayRequested: (channelId: String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    var currentActiveId by remember { mutableStateOf(channel.getIdForLanguage(preSelectedLanguage)) }
+    
+    var epgData by remember { mutableStateOf<EpgData?>(null) }
+    val isPaid = globalPaidChannels[currentActiveId] == true
+
+    LaunchedEffect(currentActiveId) {
+        epgData = JioTvRepo.fetchEpgForChannel(currentActiveId)
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                AsyncImage(
+                    model = channel.logoUrl, contentDescription = channel.title,
+                    modifier = Modifier.size(52.dp).clip(RoundedCornerShape(10.dp)).background(Color.White).padding(4.dp),
+                    contentScale = ContentScale.Fit
+                )
+                Spacer(modifier = Modifier.width(14.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(channel.title, fontSize = 16.sp, fontWeight = FontWeight.Black)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("${channel.category} • ${channel.variants.find { it.channelId == currentActiveId }?.language ?: channel.defaultLanguage}", 
+                             fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                        if (isPaid) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Surface(color = Color(0xFFD4AF37).copy(alpha = 0.2f), shape = RoundedCornerShape(4.dp)) {
+                                Text(" 🟡 Paid ", fontSize = 9.sp, color = Color(0xFFFFD700), fontWeight = FontWeight.Bold, modifier = Modifier.padding(2.dp))
+                            }
+                        }
+                    }
+                }
+                
+                IconButton(onClick = { /* Handle Favorites locally if needed */ }) {
+                    Icon(Icons.Default.FavoriteBorder, contentDescription = "Favorite", modifier = Modifier.size(20.dp), tint = Color.Gray)
+                }
+
+                if (channel.variants.size > 1) {
+                    Box {
+                        IconButton(onClick = { expanded = true }) {
+                            Icon(Icons.Default.Language, contentDescription = "Language", modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+                        }
+                        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                            channel.variants.forEach { variant ->
+                                DropdownMenuItem(
+                                    text = { Text(variant.language, fontWeight = if (currentActiveId == variant.channelId) FontWeight.Bold else FontWeight.Normal) },
+                                    onClick = { 
+                                        currentActiveId = variant.channelId
+                                        expanded = false 
+                                        onPlayRequested(currentActiveId) 
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+                
+                IconButton(
+                    onClick = { onPlayRequested(currentActiveId) },
+                    modifier = Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+                ) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = "Play", tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+
+            if (epgData != null) {
+                Spacer(modifier = Modifier.height(10.dp))
+                val format = SimpleDateFormat("HH:mm", Locale.getDefault())
+                val startStr = format.format(Date(epgData!!.startTimeMs))
+                val endStr = format.format(Date(epgData!!.endTimeMs))
+                val now = System.currentTimeMillis()
+                
+                val progressRaw = if (epgData!!.endTimeMs > epgData!!.startTimeMs) {
+                    (now - epgData!!.startTimeMs).toFloat() / (epgData!!.endTimeMs - epgData!!.startTimeMs).toFloat()
+                } else 0f
+                val animatedProgress by animateFloatAsState(targetValue = progressRaw.coerceIn(0f, 1f))
+
+                Text(epgData!!.programName, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("$startStr - $endStr", fontSize = 10.sp, color = Color.Gray)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    LinearProgressIndicator(
+                        progress = { animatedProgress },
+                        modifier = Modifier.weight(1f).height(4.dp).clip(RoundedCornerShape(2.dp)),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("Next: ${epgData!!.nextProgramName}  •  ${format.format(Date(epgData!!.nextStartTimeMs))}", fontSize = 10.sp, color = Color.Gray, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
