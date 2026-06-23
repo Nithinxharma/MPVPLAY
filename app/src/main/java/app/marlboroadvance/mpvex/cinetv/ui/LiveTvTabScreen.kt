@@ -34,6 +34,8 @@ import app.marlboroadvance.mpvex.cinetv.data.JioTvRepo
 import app.marlboroadvance.mpvex.cinetv.model.LiveChannelItem
 import app.marlboroadvance.mpvex.cinetv.model.LiveTab
 import app.marlboroadvance.mpvex.cinehub.data.NfoScanner
+import android.widget.Toast
+import android.util.Log
 
 @Composable
 fun LiveTvTabScreen(
@@ -65,9 +67,9 @@ fun LiveTvTabScreen(
             try {
                 NfoScanner.scanDirectoryForMovies(rootStorageDir)
                 NfoScanner.scanDirectoryForTvShows(rootStorageDir)
-                android.util.Log.d("LiveTvScanner", "CineHub background scan triggered successfully.")
+                Log.d("LiveTvScanner", "CineHub background scan triggered successfully.")
             } catch (e: Exception) {
-                android.util.Log.e("LiveTvScanner", "Scan loop interrupted.", e)
+                Log.e("LiveTvScanner", "Scan loop interrupted.", e)
             }
         }
     }
@@ -144,8 +146,14 @@ fun LiveTvTabScreen(
                                 channel = channel,
                                 onClick = {
                                     scope.launch {
-                                        val streamLink = JioTvRepo.getResolvedLiveUrl(channel.channelId)
-                                        onPlayRequested(streamLink, channel.title)
+                                        try {
+                                            // Pass context to properly fetch persisted tokens for URL resolution
+                                            val streamLink = JioTvRepo.getResolvedLiveUrl(context, channel.channelId)
+                                            onPlayRequested(streamLink, channel.title)
+                                        } catch (e: Exception) {
+                                            Log.e("LiveTvTabScreen", "Stream Resolution Failed", e)
+                                            Toast.makeText(context, "Stream Error: ${e.message}", Toast.LENGTH_LONG).show()
+                                        }
                                     }
                                 }
                             )
@@ -189,9 +197,29 @@ fun LiveTvTabScreen(
                                 onClick = {
                                     scope.launch {
                                         if (!isOtpSent) {
-                                            if (JioTvRepo.requestOtp(mobile)) isOtpSent = true
+                                            try {
+                                                val sent = JioTvRepo.requestOtp(mobile)
+                                                isOtpSent = sent
+                                                if (sent) {
+                                                    Toast.makeText(context, "OTP Sent Successfully ✅", Toast.LENGTH_SHORT).show()
+                                                } else {
+                                                    Toast.makeText(context, "Failed to send OTP", Toast.LENGTH_LONG).show()
+                                                }
+                                            } catch (e: Exception) {
+                                                Log.e("LiveTvTabScreen", "OTP Send Exception", e)
+                                                Toast.makeText(context, e.message ?: "Failed to send OTP", Toast.LENGTH_LONG).show()
+                                            }
                                         } else {
-                                            if (JioTvRepo.verifyOtp(context, mobile, otpCode)) userAuthed = true
+                                            try {
+                                                val success = JioTvRepo.verifyOtp(context, mobile, otpCode)
+                                                if (success) {
+                                                    userAuthed = true
+                                                    Toast.makeText(context, "Logged in Successfully ✅", Toast.LENGTH_LONG).show()
+                                                }
+                                            } catch (e: Exception) {
+                                                Log.e("LiveTvTabScreen", "OTP Verification Failed", e)
+                                                Toast.makeText(context, e.message ?: "Verification Failed ❌", Toast.LENGTH_LONG).show()
+                                            }
                                         }
                                     }
                                 }
