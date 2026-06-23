@@ -5,9 +5,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
 import android.util.Log
-import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -19,14 +17,12 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.BugReport
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material3.*
@@ -39,19 +35,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
-import java.text.SimpleDateFormat
-import java.util.Locale
-import java.util.Date
 import app.marlboroadvance.mpvex.cinetv.data.JioTvRepo
 import app.marlboroadvance.mpvex.cinetv.model.LiveChannelItem
 import app.marlboroadvance.mpvex.cinetv.model.LiveTab
-import app.marlboroadvance.mpvex.cinetv.model.EpgData
 import app.marlboroadvance.mpvex.cinetv.model.DiagnosticResult
 
 val globalPaidChannels = mutableStateMapOf<String, Boolean>()
@@ -71,9 +62,6 @@ fun LiveTvTabScreen(
     var allChannels by remember { mutableStateOf(emptyList<LiveChannelItem>()) }
     var isLoading by remember { mutableStateOf(true) }
     var fetchError by remember { mutableStateOf<String?>(null) } 
-
-    // Navigation State
-    var selectedChannelForEpg by remember { mutableStateOf<LiveChannelItem?>(null) }
 
     // Filters
     var selectedGenre by remember { mutableStateOf("All") }
@@ -102,14 +90,19 @@ fun LiveTvTabScreen(
     }
 
     val availableGenres = remember(allChannels) { listOf("All") + allChannels.map { it.category }.distinct().sorted() }
-    val availableLanguages = remember(allChannels) { 
-        listOf("All Languages") + allChannels.flatMap { it.variants.map { v -> v.language } }.distinct().sorted() 
-    }
+    
+    // Per request: UI Simplification - Only Hindi and English available
+    val allowedLanguages = listOf("Hindi", "English")
+    val availableLanguages = listOf("All Languages", "Hindi", "English")
 
     val filteredChannels = remember(allChannels, selectedGenre, selectedLanguage, searchQuery) {
         allChannels.filter { channel ->
+            // Restrict to English/Hindi
+            val hasValidLanguage = channel.variants.any { it.language.equals("English", true) || it.language.equals("Hindi", true) }
+            if (!hasValidLanguage) return@filter false
+
             val matchesGenre = selectedGenre == "All" || channel.category == selectedGenre
-            val matchesLanguage = selectedLanguage == "All Languages" || channel.variants.any { it.language == selectedLanguage }
+            val matchesLanguage = selectedLanguage == "All Languages" || channel.variants.any { it.language.equals(selectedLanguage, true) }
             val searchLower = searchQuery.trim().lowercase()
             val matchesSearch = searchLower.isBlank() || 
                 channel.title.lowercase().contains(searchLower) || 
@@ -118,34 +111,6 @@ fun LiveTvTabScreen(
             
             matchesGenre && matchesLanguage && matchesSearch
         }
-    }
-
-    // Intercept back press if EPG is open
-    BackHandler(enabled = selectedChannelForEpg != null) {
-        selectedChannelForEpg = null
-    }
-
-    if (selectedChannelForEpg != null) {
-        EpgScreen(
-            channel = selectedChannelForEpg!!,
-            onBack = { selectedChannelForEpg = null },
-            onPlayRequested = { id ->
-                scope.launch {
-                    try {
-                        val streamLink = JioTvRepo.getResolvedLiveUrl(context, id)
-                        onPlayRequested(streamLink, selectedChannelForEpg!!.title)
-                    } catch (e: Exception) {
-                        val parts = e.message?.split("|")
-                        val reason = parts?.getOrNull(0) ?: "Playback Failed"
-                        if (reason.contains("Subscription", true)) {
-                            globalPaidChannels[id] = true
-                        }
-                        Toast.makeText(context, "$reason ❌", Toast.LENGTH_LONG).show()
-                    }
-                }
-            }
-        )
-        return
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -221,7 +186,9 @@ fun LiveTvTabScreen(
                                             val reason = parts?.getOrNull(0) ?: "Playback Failed"
                                             val status = parts?.getOrNull(1) ?: "500"
                                             
-                                            if (reason.contains("Subscription", true)) globalPaidChannels[targetId] = true
+                                            if (reason.contains("Subscription", true) || status == "403") {
+                                                globalPaidChannels[targetId] = true
+                                            }
 
                                             diagnosticsReport = diagnosticsReport + DiagnosticResult(
                                                 channelName = channel.title, channelId = targetId,
@@ -319,10 +286,25 @@ fun LiveTvTabScreen(
                         contentPadding = PaddingValues(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         items(filteredChannels) { channel ->
+                            // Original Simple UI logic with immediate playback
                             LiveChannelRowItem(
                                 channel = channel,
                                 preSelectedLanguage = if (selectedLanguage != "All Languages") selectedLanguage else channel.defaultLanguage,
-                                onChannelTap = { selectedChannelForEpg = channel }
+                                onPlayRequested = { id ->
+                                    scope.launch {
+                                        try {
+                                            val streamLink = JioTvRepo.getResolvedLiveUrl(context, id)
+                                            onPlayRequested(streamLink, channel.title)
+                                        } catch (e: Exception) {
+                                            val parts = e.message?.split("|")
+                                            val reason = parts?.getOrNull(0) ?: "Playback Failed"
+                                            if (reason.contains("Subscription", true) || parts?.getOrNull(1) == "403") {
+                                                globalPaidChannels[id] = true
+                                            }
+                                            Toast.makeText(context, "$reason ❌", Toast.LENGTH_LONG).show()
+                                        }
+                                    }
+                                }
                             )
                         }
                     }
@@ -401,187 +383,61 @@ fun LiveTvTabScreen(
 fun LiveChannelRowItem(
     channel: LiveChannelItem, 
     preSelectedLanguage: String,
-    onChannelTap: () -> Unit
-) {
-    val currentActiveId = channel.getIdForLanguage(preSelectedLanguage)
-    val isPaid = globalPaidChannels[currentActiveId] == true
-
-    Card(
-        modifier = Modifier.fillMaxWidth().clickable { onChannelTap() },
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                AsyncImage(
-                    model = channel.logoUrl, contentDescription = channel.title,
-                    modifier = Modifier.size(52.dp).clip(RoundedCornerShape(10.dp)).background(Color.White).padding(4.dp),
-                    contentScale = ContentScale.Fit
-                )
-                Spacer(modifier = Modifier.width(14.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(channel.title, fontSize = 16.sp, fontWeight = FontWeight.Black)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("${channel.category} • ${channel.variants.find { it.channelId == currentActiveId }?.language ?: channel.defaultLanguage}", 
-                             fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
-                        if (isPaid) {
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Surface(color = Color(0xFFD4AF37).copy(alpha = 0.2f), shape = RoundedCornerShape(4.dp)) {
-                                Text(" 🟡 Paid ", fontSize = 9.sp, color = Color(0xFFFFD700), fontWeight = FontWeight.Bold, modifier = Modifier.padding(2.dp))
-                            }
-                        }
-                    }
-                }
-                
-                if (channel.variants.size > 1) {
-                    Icon(Icons.Default.Language, contentDescription = "Multi-Lang", modifier = Modifier.size(16.dp).padding(end = 4.dp), tint = MaterialTheme.colorScheme.primary)
-                }
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun EpgScreen(
-    channel: LiveChannelItem,
-    onBack: () -> Unit,
     onPlayRequested: (channelId: String) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
-    var currentActiveId by remember { mutableStateOf(channel.defaultChannelId) }
-    var epgData by remember { mutableStateOf<EpgData?>(null) }
+    var currentActiveId by remember { mutableStateOf(channel.getIdForLanguage(preSelectedLanguage)) }
     val isPaid = globalPaidChannels[currentActiveId] == true
 
-    LaunchedEffect(currentActiveId) {
-        epgData = JioTvRepo.fetchEpgForChannel(currentActiveId)
-    }
-
-    Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        // App Bar
-        TopAppBar(
-            title = { Text(channel.title, fontWeight = FontWeight.Bold) },
-            navigationIcon = {
-                IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "Back") }
-            },
-            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
-        )
-
-        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Spacer(Modifier.height(24.dp))
+    // Tap whole card to play immediately
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable { onPlayRequested(currentActiveId) },
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+    ) {
+        Row(modifier = Modifier.padding(12.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             AsyncImage(
                 model = channel.logoUrl, contentDescription = channel.title,
-                modifier = Modifier.size(120.dp).clip(CircleShape).background(Color.White).padding(8.dp),
+                modifier = Modifier.size(52.dp).clip(RoundedCornerShape(10.dp)).background(Color.White).padding(4.dp),
                 contentScale = ContentScale.Fit
             )
-            Spacer(Modifier.height(16.dp))
-            Text(channel.title, fontSize = 28.sp, fontWeight = FontWeight.Black)
-            
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
-                Text("${channel.category} • ${channel.variants.find { it.channelId == currentActiveId }?.language ?: channel.defaultLanguage}", 
-                     fontSize = 14.sp, color = MaterialTheme.colorScheme.primary)
-                if (isPaid) {
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Surface(color = Color(0xFFD4AF37).copy(alpha = 0.2f), shape = RoundedCornerShape(4.dp)) {
-                        Text(" 🟡 Premium ", fontSize = 11.sp, color = Color(0xFFFFD700), fontWeight = FontWeight.Bold, modifier = Modifier.padding(4.dp))
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(32.dp))
-
-            // Play / Language Row
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                Button(
-                    onClick = { onPlayRequested(currentActiveId) },
-                    modifier = Modifier.height(56.dp).weight(1f),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(24.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Watch Live", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                }
-
-                if (channel.variants.size > 1) {
-                    Spacer(Modifier.width(16.dp))
-                    Box {
-                        OutlinedButton(
-                            onClick = { expanded = true },
-                            modifier = Modifier.height(56.dp),
-                            shape = RoundedCornerShape(16.dp)
-                        ) {
-                            Icon(Icons.Default.Language, contentDescription = "Language", modifier = Modifier.size(24.dp))
-                        }
-                        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                            channel.variants.forEach { variant ->
-                                DropdownMenuItem(
-                                    text = { Text(variant.language, fontWeight = if (currentActiveId == variant.channelId) FontWeight.Bold else FontWeight.Normal) },
-                                    onClick = { 
-                                        currentActiveId = variant.channelId
-                                        expanded = false 
-                                    }
-                                )
-                            }
+            Spacer(modifier = Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(channel.title, fontSize = 16.sp, fontWeight = FontWeight.Black)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("${channel.category} • ${channel.variants.find { it.channelId == currentActiveId }?.language ?: channel.defaultLanguage}", 
+                         fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                    if (isPaid) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Surface(color = Color(0xFFD4AF37).copy(alpha = 0.2f), shape = RoundedCornerShape(4.dp)) {
+                            Text(" 🟡 Paid ", fontSize = 9.sp, color = Color(0xFFFFD700), fontWeight = FontWeight.Bold, modifier = Modifier.padding(2.dp))
                         }
                     }
                 }
             }
 
-            Spacer(Modifier.height(40.dp))
-
-            // EPG Card
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
-            ) {
-                Column(modifier = Modifier.padding(24.dp)) {
-                    if (epgData != null) {
-                        val format = SimpleDateFormat("HH:mm", Locale.getDefault())
-                        val startStr = format.format(Date(epgData!!.startTimeMs))
-                        val endStr = format.format(Date(epgData!!.endTimeMs))
-                        val now = System.currentTimeMillis()
-                        val progressRaw = if (epgData!!.endTimeMs > epgData!!.startTimeMs) {
-                            (now - epgData!!.startTimeMs).toFloat() / (epgData!!.endTimeMs - epgData!!.startTimeMs).toFloat()
-                        } else 0f
-                        val animatedProgress by animateFloatAsState(targetValue = progressRaw.coerceIn(0f, 1f))
-
-                        Text("NOW PLAYING", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.5.sp)
-                        Spacer(Modifier.height(8.dp))
-                        Text(epgData!!.programName, fontSize = 20.sp, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Spacer(Modifier.height(4.dp))
-                        Text(epgData!!.description, fontSize = 12.sp, color = Color.LightGray, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                        
-                        Spacer(Modifier.height(16.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Text(startStr, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                            Spacer(modifier = Modifier.width(12.dp))
-                            LinearProgressIndicator(
-                                progress = { animatedProgress },
-                                modifier = Modifier.weight(1f).height(6.dp).clip(RoundedCornerShape(3.dp)),
-                                color = MaterialTheme.colorScheme.primary,
-                                trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
+            if (channel.variants.size > 1) {
+                Box {
+                    IconButton(onClick = { expanded = true }) {
+                        Icon(Icons.Default.Language, contentDescription = "Language", modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+                    }
+                    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                        // In filtered mode, only show English and Hindi in the drop down as well
+                        channel.variants.filter { it.language.equals("English", true) || it.language.equals("Hindi", true) }.forEach { variant ->
+                            DropdownMenuItem(
+                                text = { Text(variant.language, fontWeight = if (currentActiveId == variant.channelId) FontWeight.Bold else FontWeight.Normal) },
+                                onClick = { 
+                                    currentActiveId = variant.channelId
+                                    expanded = false 
+                                    onPlayRequested(currentActiveId) 
+                                }
                             )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(endStr, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                        }
-
-                        Divider(modifier = Modifier.padding(vertical = 16.dp), color = Color.White.copy(alpha = 0.1f))
-                        
-                        Text("UP NEXT", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Gray, letterSpacing = 1.5.sp)
-                        Spacer(Modifier.height(8.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(format.format(Date(epgData!!.nextStartTimeMs)), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                            Spacer(Modifier.width(16.dp))
-                            Text(epgData!!.nextProgramName, fontSize = 16.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                    } else {
-                        Box(modifier = Modifier.fillMaxWidth().height(150.dp), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(24.dp))
                         }
                     }
                 }
             }
+            
+            Icon(Icons.Default.PlayArrow, contentDescription = "Play", modifier = Modifier.padding(start = 8.dp), tint = MaterialTheme.colorScheme.primary)
         }
     }
 }
