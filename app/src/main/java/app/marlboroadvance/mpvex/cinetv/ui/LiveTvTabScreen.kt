@@ -51,17 +51,23 @@ fun LiveTvTabScreen(
     var allChannels by remember { mutableStateOf(emptyList<LiveChannelItem>()) }
     var selectedCategory by remember { mutableStateOf("All") }
     var isLoading by remember { mutableStateOf(true) }
+    var fetchError by remember { mutableStateOf<String?>(null) }
 
-    // Trigger Scanner & Fetch Data
     LaunchedEffect(Unit) {
         JioTvRepo.initTokens(context)
         userAuthed = JioTvRepo.isUserLoggedIn()
         
         isLoading = true
-        allChannels = JioTvRepo.fetchLiveChannelsFromAssets(context)
-        isLoading = false
+        try {
+            fetchError = null
+            allChannels = JioTvRepo.fetchLiveChannelsFromAssets(context)
+        } catch (e: Exception) {
+            fetchError = e.message ?: "An unknown error occurred while downloading channels"
+            Log.e("LiveTvTabScreen", "Error populating live channels", e)
+        } finally {
+            isLoading = false
+        }
 
-        // Automatic NFO Scanner trigger as per CineHub activity launch logic
         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
             val rootStorageDir = android.os.Environment.getExternalStorageDirectory()
             try {
@@ -130,6 +136,14 @@ fun LiveTvTabScreen(
                     Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(strokeWidth = 2.5.dp, modifier = Modifier.size(32.dp))
                     }
+                } else if (fetchError != null) {
+                    Box(modifier = Modifier.fillMaxWidth().weight(1f).padding(24.dp), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("API Authentication Error", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(fetchError!!, fontSize = 12.sp, color = MaterialTheme.colorScheme.error.copy(alpha = 0.8f))
+                        }
+                    }
                 } else if (filteredChannels.isEmpty()) {
                     Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                         Text("No live channels match current selection.", color = Color.Gray)
@@ -147,7 +161,6 @@ fun LiveTvTabScreen(
                                 onClick = {
                                     scope.launch {
                                         try {
-                                            // Pass context to properly fetch persisted tokens for URL resolution
                                             val streamLink = JioTvRepo.getResolvedLiveUrl(context, channel.channelId)
                                             onPlayRequested(streamLink, channel.title)
                                         } catch (e: Exception) {
