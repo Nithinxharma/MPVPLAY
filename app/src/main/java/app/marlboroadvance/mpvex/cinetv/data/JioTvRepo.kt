@@ -13,9 +13,10 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
 import java.util.UUID
 import app.marlboroadvance.mpvex.cinetv.model.LiveChannelItem
+import app.marlboroadvance.mpvex.cinetv.model.ChannelVariant
 
 object JioTvRepo {
-    private val client = OkHttpClient.Builder()
+    val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
@@ -201,7 +202,6 @@ object JioTvRepo {
         val crm = prefs.getString("crmToken", "") ?: ""
         
         val url = "https://jiotv.data.cdn.jio.com/apis/v1.4/getMobileChannelList/get/?os=android&devicetype=phone"
-        Log.d("JioTvRepo", "Fetching Live Channels API: $url")
 
         val request = Request.Builder()
             .url(url)
@@ -220,16 +220,9 @@ object JioTvRepo {
             
         client.newCall(request).execute().use { response ->
             val body = response.body?.string() ?: ""
-            Log.d("JioTvRepo", "Channels API Response Code: ${response.code}")
-            Log.d("JioTvRepo", "Channels API Response Headers: ${response.headers}")
-            Log.d("JioTvRepo", "Channels API Response Body: ${body.take(1500)}")
 
-            if (!response.isSuccessful) {
-                throw Exception("HTTP Error ${response.code}: $body")
-            }
-            if (body.isBlank()) {
-                throw Exception("Server returned empty response.")
-            }
+            if (!response.isSuccessful) throw Exception("HTTP Error ${response.code}: $body")
+            if (body.isBlank()) throw Exception("Server returned empty response.")
 
             try {
                 val root = json.parseToJsonElement(body).jsonObject
@@ -240,8 +233,11 @@ object JioTvRepo {
                 
                 val resultArr = root["result"]?.jsonArray
                 if (resultArr == null || resultArr.isEmpty()) {
-                    throw Exception("API returned empty 'result' array. Is token expired? Body: ${body.take(500)}")
+                    throw Exception("API returned empty 'result' array. Is token expired?")
                 }
+
+                // Temp structure to group languages
+                val rawChannels = mutableListOf<RawChannel>()
 
                 for (i in 0 until resultArr.size) {
                     val channelNode = resultArr[i].jsonObject
@@ -249,16 +245,30 @@ object JioTvRepo {
                     val name = channelNode["channel_name"]?.jsonPrimitive?.content ?: "Unknown"
                     val catId = channelNode["channelCategoryId"]?.jsonPrimitive?.intOrNull ?: 0
                     val langId = channelNode["channelLanguageId"]?.jsonPrimitive?.intOrNull ?: 0
-                    
                     val rawLogoUrl = channelNode["logoUrl"]?.jsonPrimitive?.content ?: "$id.png"
                     
-                    val category = getCategoryName(catId)
-                    val language = getLanguageName(langId)
-                    val logoUrl = "https://jiotvimages.cdn.jio.com/dare_images/images/$rawLogoUrl"
-                    
-                    list.add(LiveChannelItem(id, name, category, language, logoUrl, "jiotv_live:$id"))
+                    rawChannels.add(RawChannel(id, name, getCategoryName(catId), getLanguageName(langId), "https://jiotvimages.cdn.jio.com/dare_images/images/$rawLogoUrl"))
                 }
-                Log.d("JioTvRepo", "Successfully parsed ${list.size} channels.")
+
+                // Group by Channel Name to eliminate duplicates and capture all language variants
+                val grouped = rawChannels.groupBy { it.name }
+                for ((name, channels) in grouped) {
+                    val baseChannel = channels.first()
+                    val variants = channels.map { ChannelVariant(it.id, it.language) }.distinctBy { it.language }
+                    
+                    list.add(
+                        LiveChannelItem(
+                            defaultChannelId = baseChannel.id,
+                            title = name,
+                            category = baseChannel.category,
+                            defaultLanguage = baseChannel.language,
+                            logoUrl = baseChannel.logoUrl,
+                            streamUrlHash = "jiotv_live:${baseChannel.id}",
+                            variants = variants
+                        )
+                    )
+                }
+
             } catch (e: Exception) {
                 Log.e("JioTvRepo", "JSON Parsing Failed on Channels API", e)
                 throw Exception("Failed to parse channel JSON: ${e.message}")
@@ -266,6 +276,8 @@ object JioTvRepo {
         }
         return@withContext list
     }
+
+    private data class RawChannel(val id: String, val name: String, val category: String, val language: String, val logoUrl: String)
 
     suspend fun getResolvedLiveUrl(context: Context, channelId: String): String = withContext(Dispatchers.IO) {
         val prefs = context.getSharedPreferences("JioTvAuthPrefs", Context.MODE_PRIVATE)
@@ -276,8 +288,6 @@ object JioTvRepo {
         val crm = prefs.getString("crmToken", "") ?: ""
 
         val payload = "stream_type=Seek&channel_id=$channelId"
-        
-        Log.d("JioTvRepo", "Fetching Live Stream Segment API for ID: $channelId")
         
         val request = Request.Builder()
             .url("https://jiotvapi.media.jio.com/playback/apis/v1/geturl?langId=6")
@@ -306,21 +316,17 @@ object JioTvRepo {
             
         client.newCall(request).execute().use { response ->
             val responseBody = response.body?.string() ?: ""
-            Log.d("JioTvRepo", "Stream Resolution Response Code: ${response.code}")
             
             try {
                 val parsed = json.parseToJsonElement(responseBody).jsonObject
                 val code = parsed["code"]?.jsonPrimitive?.intOrNull
                 
                 if (code == 200) {
-                    val m3u8Url = parsed["result"]?.jsonPrimitive?.content ?: ""
-                    Log.d("JioTvRepo", "Resolved Authentic M3U8: $m3u8Url")
-                    return@withContext m3u8Url
+                    return@withContext parsed["result"]?.jsonPrimitive?.content ?: ""
                 } else {
                     throw Exception(parsed["message"]?.jsonPrimitive?.content ?: "Stream Error $code")
                 }
             } catch (e: Exception) {
-                Log.e("JioTvRepo", "Failed parsing final URL map", e)
                 throw e
             }
         }
