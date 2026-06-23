@@ -1,6 +1,12 @@
 package app.marlboroadvance.mpvex.cinetv.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
+import android.util.Log
 import androidx.compose.animation.*
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -18,6 +24,9 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -28,16 +37,22 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.Date
 import app.marlboroadvance.mpvex.cinetv.data.JioTvRepo
 import app.marlboroadvance.mpvex.cinetv.model.LiveChannelItem
 import app.marlboroadvance.mpvex.cinetv.model.LiveTab
-import android.widget.Toast
-import android.util.Log
+import app.marlboroadvance.mpvex.cinetv.model.EpgData
+import app.marlboroadvance.mpvex.cinetv.model.DiagnosticResult
+
+val globalPaidChannels = mutableStateMapOf<String, Boolean>()
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -56,15 +71,14 @@ fun LiveTvTabScreen(
     var fetchError by remember { mutableStateOf<String?>(null) } 
 
     // Filters
-    var selectedGenre by remember { mutableStateOf("All Genres") }
+    var selectedGenre by remember { mutableStateOf("All") }
     var selectedLanguage by remember { mutableStateOf("All Languages") }
-    var genreExpanded by remember { mutableStateOf(false) }
     var languageExpanded by remember { mutableStateOf(false) }
 
     // Diagnostics
     var showDiagnostics by remember { mutableStateOf(false) }
     var diagnosticRunning by remember { mutableStateOf(false) }
-    var diagnosticResults by remember { mutableStateOf(listOf<String>()) }
+    var diagnosticsReport by remember { mutableStateOf(listOf<DiagnosticResult>()) }
 
     LaunchedEffect(Unit) {
         JioTvRepo.initTokens(context)
@@ -81,14 +95,14 @@ fun LiveTvTabScreen(
         }
     }
 
-    val availableGenres = remember(allChannels) { listOf("All Genres") + allChannels.map { it.category }.distinct().sorted() }
+    val availableGenres = remember(allChannels) { listOf("All") + allChannels.map { it.category }.distinct().sorted() }
     val availableLanguages = remember(allChannels) { 
         listOf("All Languages") + allChannels.flatMap { it.variants.map { v -> v.language } }.distinct().sorted() 
     }
 
     val filteredChannels = remember(allChannels, selectedGenre, selectedLanguage, searchQuery) {
         allChannels.filter { channel ->
-            val matchesGenre = selectedGenre == "All Genres" || channel.category == selectedGenre
+            val matchesGenre = selectedGenre == "All" || channel.category == selectedGenre
             val matchesLanguage = selectedLanguage == "All Languages" || channel.variants.any { it.language == selectedLanguage }
             val searchLower = searchQuery.trim().lowercase()
             val matchesSearch = searchLower.isBlank() || 
@@ -113,24 +127,24 @@ fun LiveTvTabScreen(
 
         when (activeSubTab) {
             LiveTab.CHANNELS -> {
-                // Filter Row
-                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    // Genre Dropdown
-                    ExposedDropdownMenuBox(expanded = genreExpanded, onExpandedChange = { genreExpanded = it }, modifier = Modifier.weight(1f)) {
-                        OutlinedTextField(
-                            value = selectedGenre, onValueChange = {}, readOnly = true,
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = genreExpanded) },
-                            modifier = Modifier.menuAnchor().fillMaxWidth(), textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp)
+                
+                // M3 Filter Chips for Genres
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(availableGenres) { genre ->
+                        FilterChip(
+                            selected = selectedGenre == genre,
+                            onClick = { selectedGenre = genre },
+                            label = { Text(genre, fontSize = 12.sp) }
                         )
-                        ExposedDropdownMenu(expanded = genreExpanded, onDismissRequest = { genreExpanded = false }) {
-                            availableGenres.forEach { genre ->
-                                DropdownMenuItem(text = { Text(genre, fontSize = 12.sp) }, onClick = { selectedGenre = genre; genreExpanded = false })
-                            }
-                        }
                     }
-                    
-                    // Language Dropdown
-                    ExposedDropdownMenuBox(expanded = languageExpanded, onExpandedChange = { languageExpanded = it }, modifier = Modifier.weight(1f)) {
+                }
+
+                // M3 Language Dropdown
+                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, bottom = 8.dp)) {
+                    ExposedDropdownMenuBox(expanded = languageExpanded, onExpandedChange = { languageExpanded = it }, modifier = Modifier.fillMaxWidth()) {
                         OutlinedTextField(
                             value = selectedLanguage, onValueChange = {}, readOnly = true,
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = languageExpanded) },
@@ -157,42 +171,72 @@ fun LiveTvTabScreen(
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary),
                         onClick = {
                             diagnosticRunning = true
-                            diagnosticResults = listOf("Starting diagnostic on ${allChannels.size} channels...")
+                            diagnosticsReport = emptyList()
                             scope.launch {
-                                var passed = 0
-                                var failed = 0
                                 for (channel in allChannels) {
                                     val targetId = channel.defaultChannelId
+                                    val startTime = System.currentTimeMillis()
                                     try {
-                                        val url = JioTvRepo.getResolvedLiveUrl(context, targetId)
-                                        // Simulating HTTP check / 15s MPV startup test via lightweight resolve verification
-                                        if (url.contains(".m3u8")) {
-                                            passed++
-                                            diagnosticResults = diagnosticResults + "[OK] ${channel.title} ($targetId)"
-                                        } else {
-                                            failed++
-                                            diagnosticResults = diagnosticResults + "[FAIL] ${channel.title} - Invalid Manifest"
-                                        }
+                                        // This will now execute the identical robust check that manual playback uses
+                                        JioTvRepo.getResolvedLiveUrl(context, targetId)
+                                        diagnosticsReport = diagnosticsReport + DiagnosticResult(
+                                            channelName = channel.title, channelId = targetId,
+                                            category = channel.category, language = channel.defaultLanguage,
+                                            result = "Working", failureReason = "None", httpStatus = "200",
+                                            timeTakenMs = System.currentTimeMillis() - startTime
+                                        )
                                     } catch (e: Exception) {
-                                        failed++
-                                        diagnosticResults = diagnosticResults + "[FAIL] ${channel.title} - ${e.message}"
+                                        val parts = e.message?.split("|")
+                                        val reason = parts?.getOrNull(0) ?: "Playback Failed"
+                                        val status = parts?.getOrNull(1) ?: "500"
+                                        
+                                        if (reason.contains("Subscription", true)) {
+                                            globalPaidChannels[targetId] = true
+                                        }
+
+                                        diagnosticsReport = diagnosticsReport + DiagnosticResult(
+                                            channelName = channel.title, channelId = targetId,
+                                            category = channel.category, language = channel.defaultLanguage,
+                                            result = "Failed", failureReason = reason, httpStatus = status,
+                                            timeTakenMs = System.currentTimeMillis() - startTime
+                                        )
                                     }
-                                    delay(200) // prevent rate limit during test
+                                    delay(200) // gentle rate limiting
                                 }
-                                diagnosticResults = diagnosticResults + "--- REPORT ---"
-                                diagnosticResults = diagnosticResults + "Total: ${allChannels.size} | Passed: $passed | Failed: $failed"
                                 diagnosticRunning = false
                             }
                         }
                     ) {
                         Icon(Icons.Default.BugReport, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
-                        Text(if (diagnosticRunning) "Running Tests..." else "Test All Channels")
+                        Text(if (diagnosticRunning) "Running Diagnostic Tests..." else "Test All Channels")
                     }
 
-                    if (diagnosticResults.isNotEmpty()) {
-                        LazyColumn(modifier = Modifier.fillMaxWidth().height(150.dp).background(Color.Black).padding(8.dp)) {
-                            items(diagnosticResults) { log -> Text(log, color = Color.Green, fontSize = 9.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace) }
+                    if (diagnosticsReport.isNotEmpty() && !diagnosticRunning) {
+                        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            val copyFunc = { items: List<DiagnosticResult>, title: String ->
+                                val text = buildString {
+                                    appendLine("Channel Name\tCategory\tLanguage\tResult\tFailure Reason\tHTTP Status")
+                                    appendLine("-------------------------------------------------------------------------")
+                                    items.forEach { appendLine("${it.channelName}\t${it.category}\t${it.language}\t${it.result}\t${it.failureReason}\t${it.httpStatus}") }
+                                }
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(ClipData.newPlainText(title, text))
+                                Toast.makeText(context, "Copied ${items.size} channels", Toast.LENGTH_SHORT).show()
+                            }
+                            
+                            OutlinedButton(onClick = { copyFunc(diagnosticsReport, "Full Report") }, modifier = Modifier.weight(1f)) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Text(" Full", fontSize = 10.sp)
+                            }
+                            OutlinedButton(onClick = { copyFunc(diagnosticsReport.filter { it.result == "Working" }, "Working") }, modifier = Modifier.weight(1f)) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Text(" Working", fontSize = 10.sp)
+                            }
+                            OutlinedButton(onClick = { copyFunc(diagnosticsReport.filter { it.result == "Failed" }, "Failed") }, modifier = Modifier.weight(1f)) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Text(" Failed", fontSize = 10.sp)
+                            }
                         }
                     }
                 }
@@ -218,7 +262,12 @@ fun LiveTvTabScreen(
                                             val streamLink = JioTvRepo.getResolvedLiveUrl(context, id)
                                             onPlayRequested(streamLink, channel.title)
                                         } catch (e: Exception) {
-                                            Toast.makeText(context, "Stream Error: ${e.message}", Toast.LENGTH_LONG).show()
+                                            val parts = e.message?.split("|")
+                                            val reason = parts?.getOrNull(0) ?: "Playback Failed"
+                                            if (reason.contains("Subscription", true)) {
+                                                globalPaidChannels[id] = true
+                                            }
+                                            Toast.makeText(context, "$reason ❌", Toast.LENGTH_LONG).show()
                                         }
                                     }
                                 }
@@ -272,7 +321,6 @@ fun LiveTvTabScreen(
                                                     Toast.makeText(context, "Failed to send OTP", Toast.LENGTH_LONG).show()
                                                 }
                                             } catch (e: Exception) {
-                                                Log.e("LiveTvTabScreen", "OTP Send Exception", e)
                                                 Toast.makeText(context, e.message ?: "Failed to send OTP", Toast.LENGTH_LONG).show()
                                             }
                                         } else {
@@ -283,7 +331,6 @@ fun LiveTvTabScreen(
                                                     Toast.makeText(context, "Logged in Successfully ✅", Toast.LENGTH_LONG).show()
                                                 }
                                             } catch (e: Exception) {
-                                                Log.e("LiveTvTabScreen", "OTP Verification Failed", e)
                                                 Toast.makeText(context, e.message ?: "Verification Failed ❌", Toast.LENGTH_LONG).show()
                                             }
                                         }
@@ -293,60 +340,3 @@ fun LiveTvTabScreen(
                         }
                     }
                 }
-            }
-        }
-    }
-}
-
-@Composable
-fun LiveChannelRowItem(
-    channel: LiveChannelItem, 
-    preSelectedLanguage: String,
-    onPlayRequested: (channelId: String) -> Unit
-) {
-    var expanded by remember { mutableStateOf(false) }
-    var currentActiveId by remember { mutableStateOf(channel.getIdForLanguage(preSelectedLanguage)) }
-
-    Box(
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.25f))
-            .border(BorderStroke(0.5.dp, Color.White.copy(alpha = 0.08f)), RoundedCornerShape(16.dp))
-            .clickable { onPlayRequested(currentActiveId) }
-    ) {
-        Row(modifier = Modifier.padding(12.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            AsyncImage(
-                model = channel.logoUrl, contentDescription = channel.title,
-                modifier = Modifier.size(52.dp).clip(RoundedCornerShape(10.dp)).background(Color.White).padding(4.dp),
-                contentScale = ContentScale.Fit
-            )
-            Spacer(modifier = Modifier.width(14.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(channel.title, fontSize = 14.sp, fontWeight = FontWeight.Black)
-                Text("${channel.category} • ${channel.variants.find { it.channelId == currentActiveId }?.language ?: channel.defaultLanguage}", 
-                     fontSize = 10.sp, color = MaterialTheme.colorScheme.primary)
-            }
-            
-            if (channel.variants.size > 1) {
-                Box {
-                    IconButton(onClick = { expanded = true }) {
-                        Icon(Icons.Default.Language, contentDescription = "Select Language", tint = MaterialTheme.colorScheme.primary)
-                    }
-                    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                        channel.variants.forEach { variant ->
-                            DropdownMenuItem(
-                                text = { Text(variant.language, fontWeight = if (currentActiveId == variant.channelId) FontWeight.Bold else FontWeight.Normal) },
-                                onClick = { 
-                                    currentActiveId = variant.channelId
-                                    expanded = false 
-                                    onPlayRequested(currentActiveId) 
-                                }
-                            )
-                        }
-                    }
-                }
-            }
-            
-            Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.padding(start = 8.dp))
-        }
-    }
-}
