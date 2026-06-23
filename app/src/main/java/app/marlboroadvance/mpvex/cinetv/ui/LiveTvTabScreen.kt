@@ -11,7 +11,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -91,13 +90,11 @@ fun LiveTvTabScreen(
 
     val availableGenres = remember(allChannels) { listOf("All") + allChannels.map { it.category }.distinct().sorted() }
     
-    // Per request: UI Simplification - Only Hindi and English available
-    val allowedLanguages = listOf("Hindi", "English")
     val availableLanguages = listOf("All Languages", "Hindi", "English")
 
     val filteredChannels = remember(allChannels, selectedGenre, selectedLanguage, searchQuery) {
         allChannels.filter { channel ->
-            // Restrict to English/Hindi
+            // Restrict strictly to English/Hindi variants
             val hasValidLanguage = channel.variants.any { it.language.equals("English", true) || it.language.equals("Hindi", true) }
             if (!hasValidLanguage) return@filter false
 
@@ -174,7 +171,7 @@ fun LiveTvTabScreen(
                                         val targetId = channel.defaultChannelId
                                         val startTime = System.currentTimeMillis()
                                         try {
-                                            val url = JioTvRepo.getResolvedLiveUrl(context, targetId)
+                                            val url = JioTvRepo.getResolvedLiveUrl(context, targetId, channel.title)
                                             diagnosticsReport = diagnosticsReport + DiagnosticResult(
                                                 channelName = channel.title, channelId = targetId,
                                                 category = channel.category, language = channel.defaultLanguage,
@@ -223,7 +220,7 @@ fun LiveTvTabScreen(
                                     text = { Text("Export Working Streams") },
                                     onClick = { 
                                         exportExpanded = false
-                                        Toast.makeText(context, "Validating streams before export...", Toast.LENGTH_LONG).show()
+                                        Toast.makeText(context, "Exporting streams...", Toast.LENGTH_LONG).show()
                                         scope.launch { JioTvRepo.exportWorkingStreamsAsM3u(context, allChannels) }
                                     }
                                 )
@@ -286,19 +283,19 @@ fun LiveTvTabScreen(
                         contentPadding = PaddingValues(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         items(filteredChannels) { channel ->
-                            // Original Simple UI logic with immediate playback
+                            // Original Simple UI tap-to-play logic restored exactly
                             LiveChannelRowItem(
                                 channel = channel,
                                 preSelectedLanguage = if (selectedLanguage != "All Languages") selectedLanguage else channel.defaultLanguage,
                                 onPlayRequested = { id ->
                                     scope.launch {
                                         try {
-                                            val streamLink = JioTvRepo.getResolvedLiveUrl(context, id)
+                                            val streamLink = JioTvRepo.getResolvedLiveUrl(context, id, channel.title)
                                             onPlayRequested(streamLink, channel.title)
                                         } catch (e: Exception) {
                                             val parts = e.message?.split("|")
                                             val reason = parts?.getOrNull(0) ?: "Playback Failed"
-                                            if (reason.contains("Subscription", true) || parts?.getOrNull(1) == "403") {
+                                            if (reason.contains("Subscription", true) || parts?.getOrNull(1) == "403" || parts?.getOrNull(1) == "3012") {
                                                 globalPaidChannels[id] = true
                                             }
                                             Toast.makeText(context, "$reason ❌", Toast.LENGTH_LONG).show()
@@ -389,7 +386,6 @@ fun LiveChannelRowItem(
     var currentActiveId by remember { mutableStateOf(channel.getIdForLanguage(preSelectedLanguage)) }
     val isPaid = globalPaidChannels[currentActiveId] == true
 
-    // Tap whole card to play immediately
     Card(
         modifier = Modifier.fillMaxWidth().clickable { onPlayRequested(currentActiveId) },
         shape = RoundedCornerShape(16.dp),
@@ -422,7 +418,6 @@ fun LiveChannelRowItem(
                         Icon(Icons.Default.Language, contentDescription = "Language", modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
                     }
                     DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                        // In filtered mode, only show English and Hindi in the drop down as well
                         channel.variants.filter { it.language.equals("English", true) || it.language.equals("Hindi", true) }.forEach { variant ->
                             DropdownMenuItem(
                                 text = { Text(variant.language, fontWeight = if (currentActiveId == variant.channelId) FontWeight.Bold else FontWeight.Normal) },
