@@ -51,8 +51,9 @@ fun LiveTvTabScreen(
     var allChannels by remember { mutableStateOf(emptyList<LiveChannelItem>()) }
     var selectedCategory by remember { mutableStateOf("All") }
     var isLoading by remember { mutableStateOf(true) }
-    var fetchError by remember { mutableStateOf<String?>(null) }
+    var fetchError by remember { mutableStateOf<String?>(null) } // Added to capture and display API errors
 
+    // Trigger Scanner & Fetch Data
     LaunchedEffect(Unit) {
         JioTvRepo.initTokens(context)
         userAuthed = JioTvRepo.isUserLoggedIn()
@@ -68,6 +69,7 @@ fun LiveTvTabScreen(
             isLoading = false
         }
 
+        // Automatic NFO Scanner trigger as per CineHub activity launch logic
         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
             val rootStorageDir = android.os.Environment.getExternalStorageDirectory()
             try {
@@ -137,6 +139,7 @@ fun LiveTvTabScreen(
                         CircularProgressIndicator(strokeWidth = 2.5.dp, modifier = Modifier.size(32.dp))
                     }
                 } else if (fetchError != null) {
+                    // Display specific API Error directly in the UI if fetching channels fails
                     Box(modifier = Modifier.fillMaxWidth().weight(1f).padding(24.dp), contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text("API Authentication Error", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
@@ -161,6 +164,7 @@ fun LiveTvTabScreen(
                                 onClick = {
                                     scope.launch {
                                         try {
+                                            // Pass context to properly fetch persisted tokens for URL resolution
                                             val streamLink = JioTvRepo.getResolvedLiveUrl(context, channel.channelId)
                                             onPlayRequested(streamLink, channel.title)
                                         } catch (e: Exception) {
