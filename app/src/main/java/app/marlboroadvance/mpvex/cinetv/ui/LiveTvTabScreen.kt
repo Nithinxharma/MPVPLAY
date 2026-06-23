@@ -40,9 +40,7 @@ import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import app.marlboroadvance.mpvex.cinetv.data.JioTvRepo
-import app.marlboroadvance.mpvex.cinetv.model.LiveChannelItem
-import app.marlboroadvance.mpvex.cinetv.model.LiveTab
-import app.marlboroadvance.mpvex.cinetv.model.DiagnosticResult
+import app.marlboroadvance.mpvex.cinetv.model.*
 
 val globalPaidChannels = mutableStateMapOf<String, Boolean>()
 
@@ -67,6 +65,10 @@ fun LiveTvTabScreen(
     var selectedLanguage by remember { mutableStateOf("All Languages") }
     var languageExpanded by remember { mutableStateOf(false) }
 
+    // Smart Cache / M3U Sync UI States
+    var smartCache by remember { mutableStateOf(mapOf<String, ChannelCacheEntry>()) }
+    var pendingFeedbackChannel by remember { mutableStateOf<LiveChannelItem?>(null) }
+
     // Diagnostics & Export
     var showDiagnostics by remember { mutableStateOf(false) }
     var diagnosticRunning by remember { mutableStateOf(false) }
@@ -76,6 +78,7 @@ fun LiveTvTabScreen(
     LaunchedEffect(Unit) {
         JioTvRepo.initTokens(context)
         userAuthed = JioTvRepo.isUserLoggedIn()
+        smartCache = JioTvRepo.getChannelCacheMap(context)
         
         isLoading = true
         try {
@@ -89,12 +92,10 @@ fun LiveTvTabScreen(
     }
 
     val availableGenres = remember(allChannels) { listOf("All") + allChannels.map { it.category }.distinct().sorted() }
-    
     val availableLanguages = listOf("All Languages", "Hindi", "English")
 
     val filteredChannels = remember(allChannels, selectedGenre, selectedLanguage, searchQuery) {
         allChannels.filter { channel ->
-            // Restrict strictly to English/Hindi variants
             val hasValidLanguage = channel.variants.any { it.language.equals("English", true) || it.language.equals("Hindi", true) }
             if (!hasValidLanguage) return@filter false
 
@@ -110,264 +111,314 @@ fun LiveTvTabScreen(
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        TabRow(selectedTabIndex = activeSubTab.ordinal, containerColor = Color.Transparent, divider = {}) {
-            LiveTab.values().forEach { tab ->
-                Tab(
-                    selected = activeSubTab == tab,
-                    onClick = { activeSubTab = tab },
-                    text = { Text(tab.label, fontWeight = FontWeight.Bold, fontSize = 12.sp) }
-                )
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            TabRow(selectedTabIndex = activeSubTab.ordinal, containerColor = Color.Transparent, divider = {}) {
+                LiveTab.values().forEach { tab ->
+                    Tab(
+                        selected = activeSubTab == tab,
+                        onClick = { activeSubTab = tab },
+                        text = { Text(tab.label, fontWeight = FontWeight.Bold, fontSize = 12.sp) }
+                    )
+                }
             }
-        }
 
-        when (activeSubTab) {
-            LiveTab.CHANNELS -> {
-                
-                LazyRow(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(availableGenres) { genre ->
-                        FilterChip(
-                            selected = selectedGenre == genre,
-                            onClick = { selectedGenre = genre },
-                            label = { Text(genre, fontSize = 12.sp) }
-                        )
-                    }
-                }
-
-                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 8.dp)) {
-                    ExposedDropdownMenuBox(expanded = languageExpanded, onExpandedChange = { languageExpanded = it }, modifier = Modifier.fillMaxWidth()) {
-                        OutlinedTextField(
-                            value = selectedLanguage, onValueChange = {}, readOnly = true,
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = languageExpanded) },
-                            modifier = Modifier.menuAnchor().fillMaxWidth(), textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp)
-                        )
-                        ExposedDropdownMenu(expanded = languageExpanded, onDismissRequest = { languageExpanded = false }) {
-                            availableLanguages.forEach { lang ->
-                                DropdownMenuItem(text = { Text(lang, fontSize = 12.sp) }, onClick = { selectedLanguage = lang; languageExpanded = false })
-                            }
-                        }
-                    }
-                }
-
-                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Developer Mode", fontSize = 10.sp, color = Color.Gray, modifier = Modifier.weight(1f))
-                    Switch(checked = showDiagnostics, onCheckedChange = { showDiagnostics = it }, modifier = Modifier.scale(0.7f))
-                }
-
-                if (showDiagnostics) {
-                    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            modifier = Modifier.weight(1f),
-                            enabled = !diagnosticRunning && allChannels.isNotEmpty(),
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary),
-                            onClick = {
-                                diagnosticRunning = true
-                                diagnosticsReport = emptyList()
-                                scope.launch {
-                                    for (channel in allChannels) {
-                                        val targetId = channel.defaultChannelId
-                                        val startTime = System.currentTimeMillis()
-                                        try {
-                                            val url = JioTvRepo.getResolvedLiveUrl(context, targetId, channel.title)
-                                            diagnosticsReport = diagnosticsReport + DiagnosticResult(
-                                                channelName = channel.title, channelId = targetId,
-                                                category = channel.category, language = channel.defaultLanguage,
-                                                result = "Working", failureReason = "None", httpStatus = "200",
-                                                timeTakenMs = System.currentTimeMillis() - startTime, resolvedUrl = url
-                                            )
-                                        } catch (e: Exception) {
-                                            val parts = e.message?.split("|")
-                                            val reason = parts?.getOrNull(0) ?: "Playback Failed"
-                                            val status = parts?.getOrNull(1) ?: "500"
-                                            
-                                            if (reason.contains("Subscription", true) || status == "403") {
-                                                globalPaidChannels[targetId] = true
-                                            }
-
-                                            diagnosticsReport = diagnosticsReport + DiagnosticResult(
-                                                channelName = channel.title, channelId = targetId,
-                                                category = channel.category, language = channel.defaultLanguage,
-                                                result = "Failed", failureReason = reason, httpStatus = status,
-                                                timeTakenMs = System.currentTimeMillis() - startTime
-                                            )
-                                        }
-                                        delay(200)
-                                    }
-                                    diagnosticRunning = false
-                                }
-                            }
-                        ) {
-                            Icon(Icons.Default.BugReport, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text(if (diagnosticRunning) "Testing..." else "Test All", fontSize = 11.sp)
-                        }
-
-                        Box(modifier = Modifier.weight(1f)) {
-                            Button(
-                                modifier = Modifier.fillMaxWidth(),
-                                enabled = !diagnosticRunning && allChannels.isNotEmpty(),
-                                onClick = { exportExpanded = true }
-                            ) {
-                                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("Export M3U", fontSize = 11.sp)
-                            }
-                            DropdownMenu(expanded = exportExpanded, onDismissRequest = { exportExpanded = false }) {
-                                DropdownMenuItem(
-                                    text = { Text("Export Working Streams") },
-                                    onClick = { 
-                                        exportExpanded = false
-                                        Toast.makeText(context, "Exporting streams...", Toast.LENGTH_LONG).show()
-                                        scope.launch { JioTvRepo.exportWorkingStreamsAsM3u(context, allChannels) }
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Export Only Premium") },
-                                    onClick = { 
-                                        exportExpanded = false
-                                        scope.launch { JioTvRepo.exportWorkingStreamsAsM3u(context, allChannels.filter { globalPaidChannels[it.defaultChannelId] == true }) }
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Export Only Free") },
-                                    onClick = { 
-                                        exportExpanded = false
-                                        scope.launch { JioTvRepo.exportWorkingStreamsAsM3u(context, allChannels.filter { globalPaidChannels[it.defaultChannelId] != true }) }
-                                    }
-                                )
-                            }
-                        }
-                    }
-
-                    if (diagnosticsReport.isNotEmpty() && !diagnosticRunning) {
-                        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            val copyFunc = { items: List<DiagnosticResult>, title: String ->
-                                val text = buildString {
-                                    appendLine("Channel Name\tCategory\tLanguage\tResult\tFailure Reason\tHTTP Status")
-                                    appendLine("-------------------------------------------------------------------------")
-                                    items.forEach { appendLine("${it.channelName}\t${it.category}\t${it.language}\t${it.result}\t${it.failureReason}\t${it.httpStatus}") }
-                                }
-                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                clipboard.setPrimaryClip(ClipData.newPlainText(title, text))
-                                Toast.makeText(context, "Copied ${items.size} channels", Toast.LENGTH_SHORT).show()
-                            }
-                            
-                            OutlinedButton(onClick = { copyFunc(diagnosticsReport, "Full Report") }, modifier = Modifier.weight(1f)) {
-                                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(12.dp))
-                                Text(" Full", fontSize = 9.sp)
-                            }
-                            OutlinedButton(onClick = { copyFunc(diagnosticsReport.filter { it.result == "Working" }, "Working") }, modifier = Modifier.weight(1f)) {
-                                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(12.dp))
-                                Text(" Working", fontSize = 9.sp)
-                            }
-                            OutlinedButton(onClick = { copyFunc(diagnosticsReport.filter { it.result == "Failed" }, "Failed") }, modifier = Modifier.weight(1f)) {
-                                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(12.dp))
-                                Text(" Failed", fontSize = 9.sp)
-                            }
-                        }
-                    }
-                }
-
-                if (isLoading) {
-                    Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-                } else if (fetchError != null) {
-                    Box(modifier = Modifier.fillMaxWidth().weight(1f).padding(24.dp), contentAlignment = Alignment.Center) {
-                        Text(fetchError!!, color = MaterialTheme.colorScheme.error)
-                    }
-                } else {
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(1), modifier = Modifier.fillMaxWidth().weight(1f),
-                        contentPadding = PaddingValues(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)
+            when (activeSubTab) {
+                LiveTab.CHANNELS -> {
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        items(filteredChannels) { channel ->
-                            // Original Simple UI tap-to-play logic restored exactly
-                            LiveChannelRowItem(
-                                channel = channel,
-                                preSelectedLanguage = if (selectedLanguage != "All Languages") selectedLanguage else channel.defaultLanguage,
-                                onPlayRequested = { id ->
-                                    scope.launch {
-                                        try {
-                                            val streamLink = JioTvRepo.getResolvedLiveUrl(context, id, channel.title)
-                                            onPlayRequested(streamLink, channel.title)
-                                        } catch (e: Exception) {
-                                            val parts = e.message?.split("|")
-                                            val reason = parts?.getOrNull(0) ?: "Playback Failed"
-                                            if (reason.contains("Subscription", true) || parts?.getOrNull(1) == "403" || parts?.getOrNull(1) == "3012") {
-                                                globalPaidChannels[id] = true
-                                            }
-                                            Toast.makeText(context, "$reason ❌", Toast.LENGTH_LONG).show()
-                                        }
-                                    }
-                                }
+                        items(availableGenres) { genre ->
+                            FilterChip(
+                                selected = selectedGenre == genre,
+                                onClick = { selectedGenre = genre },
+                                label = { Text(genre, fontSize = 12.sp) }
                             )
                         }
                     }
-                }
-            }
 
-            LiveTab.JIO_LOGIN -> {
-                Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.TopCenter) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(24.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f))
-                            .border(BorderStroke(0.5.dp, Color.White.copy(alpha = 0.1f)), RoundedCornerShape(24.dp))
-                            .padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        if (userAuthed) {
-                            Icon(Icons.Default.Lock, contentDescription = null, tint = Color.Green, modifier = Modifier.size(48.dp))
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text("Authenticated Session Secure", fontWeight = FontWeight.Black, fontSize = 16.sp)
-                            Button(
-                                onClick = { JioTvRepo.logout(context); userAuthed = false },
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                            ) { Text("Revoke Login Session") }
-                        } else {
-                            var mobile by remember { mutableStateOf("") }
-                            var otpCode by remember { mutableStateOf("") }
-                            var isOtpSent by remember { mutableStateOf(false) }
-                            
-                            OutlinedTextField(value = mobile, onValueChange = { mobile = it }, label = { Text("Mobile Number") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                            if (isOtpSent) {
-                                Spacer(modifier = Modifier.height(10.dp))
-                                OutlinedTextField(value = otpCode, onValueChange = { otpCode = it }, label = { Text("Enter OTP Code") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 8.dp)) {
+                        ExposedDropdownMenuBox(expanded = languageExpanded, onExpandedChange = { languageExpanded = it }, modifier = Modifier.fillMaxWidth()) {
+                            OutlinedTextField(
+                                value = selectedLanguage, onValueChange = {}, readOnly = true,
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = languageExpanded) },
+                                modifier = Modifier.menuAnchor().fillMaxWidth(), textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp)
+                            )
+                            ExposedDropdownMenu(expanded = languageExpanded, onDismissRequest = { languageExpanded = false }) {
+                                availableLanguages.forEach { lang ->
+                                    DropdownMenuItem(text = { Text(lang, fontSize = 12.sp) }, onClick = { selectedLanguage = lang; languageExpanded = false })
+                                }
                             }
-                            Spacer(modifier = Modifier.height(16.dp))
+                        }
+                    }
+
+                    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Developer Mode", fontSize = 10.sp, color = Color.Gray, modifier = Modifier.weight(1f))
+                        Switch(checked = showDiagnostics, onCheckedChange = { showDiagnostics = it }, modifier = Modifier.scale(0.7f))
+                    }
+
+                    if (showDiagnostics) {
+                        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier.weight(1f),
+                                enabled = !diagnosticRunning && allChannels.isNotEmpty(),
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary),
                                 onClick = {
+                                    diagnosticRunning = true
+                                    diagnosticsReport = emptyList()
                                     scope.launch {
-                                        if (!isOtpSent) {
+                                        for (channel in allChannels) {
+                                            val targetId = channel.defaultChannelId
+                                            val startTime = System.currentTimeMillis()
                                             try {
-                                                val sent = JioTvRepo.requestOtp(mobile)
-                                                isOtpSent = sent
-                                                if (sent) {
-                                                    Toast.makeText(context, "OTP Sent Successfully ✅", Toast.LENGTH_SHORT).show()
-                                                } else {
-                                                    Toast.makeText(context, "Failed to send OTP", Toast.LENGTH_LONG).show()
-                                                }
+                                                val resolved = JioTvRepo.getResolvedLiveUrl(context, targetId, channel.title)
+                                                diagnosticsReport = diagnosticsReport + DiagnosticResult(
+                                                    channelName = channel.title, channelId = targetId,
+                                                    category = channel.category, language = channel.defaultLanguage,
+                                                    result = "Working", failureReason = "None", httpStatus = "200",
+                                                    timeTakenMs = System.currentTimeMillis() - startTime, resolvedUrl = resolved.url
+                                                )
                                             } catch (e: Exception) {
-                                                Toast.makeText(context, e.message ?: "Failed to send OTP", Toast.LENGTH_LONG).show()
+                                                val parts = e.message?.split("|")
+                                                val reason = parts?.getOrNull(0) ?: "Playback Failed"
+                                                val status = parts?.getOrNull(1) ?: "500"
+                                                
+                                                if (reason.contains("Subscription", true) || status == "403") {
+                                                    globalPaidChannels[targetId] = true
+                                                }
+
+                                                diagnosticsReport = diagnosticsReport + DiagnosticResult(
+                                                    channelName = channel.title, channelId = targetId,
+                                                    category = channel.category, language = channel.defaultLanguage,
+                                                    result = "Failed", failureReason = reason, httpStatus = status,
+                                                    timeTakenMs = System.currentTimeMillis() - startTime
+                                                )
                                             }
-                                        } else {
+                                            delay(200)
+                                        }
+                                        diagnosticRunning = false
+                                    }
+                                }
+                            ) {
+                                Icon(Icons.Default.BugReport, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text(if (diagnosticRunning) "Testing..." else "Test All", fontSize = 11.sp)
+                            }
+
+                            Box(modifier = Modifier.weight(1f)) {
+                                Button(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    enabled = !diagnosticRunning && allChannels.isNotEmpty(),
+                                    onClick = { exportExpanded = true }
+                                ) {
+                                    Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Export M3U", fontSize = 11.sp)
+                                }
+                                DropdownMenu(expanded = exportExpanded, onDismissRequest = { exportExpanded = false }) {
+                                    DropdownMenuItem(
+                                        text = { Text("Export Working Streams") },
+                                        onClick = { 
+                                            exportExpanded = false
+                                            Toast.makeText(context, "Exporting streams...", Toast.LENGTH_LONG).show()
+                                            scope.launch { JioTvRepo.exportWorkingStreamsAsM3u(context, allChannels) }
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Export Only Premium") },
+                                        onClick = { 
+                                            exportExpanded = false
+                                            scope.launch { JioTvRepo.exportWorkingStreamsAsM3u(context, allChannels.filter { globalPaidChannels[it.defaultChannelId] == true }) }
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Export Only Free") },
+                                        onClick = { 
+                                            exportExpanded = false
+                                            scope.launch { JioTvRepo.exportWorkingStreamsAsM3u(context, allChannels.filter { globalPaidChannels[it.defaultChannelId] != true }) }
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        if (diagnosticsReport.isNotEmpty() && !diagnosticRunning) {
+                            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                val copyFunc = { items: List<DiagnosticResult>, title: String ->
+                                    val text = buildString {
+                                        appendLine("Channel Name\tCategory\tLanguage\tResult\tFailure Reason\tHTTP Status")
+                                        appendLine("-------------------------------------------------------------------------")
+                                        items.forEach { appendLine("${it.channelName}\t${it.category}\t${it.language}\t${it.result}\t${it.failureReason}\t${it.httpStatus}") }
+                                    }
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                    clipboard.setPrimaryClip(ClipData.newPlainText(title, text))
+                                    Toast.makeText(context, "Copied ${items.size} channels", Toast.LENGTH_SHORT).show()
+                                }
+                                
+                                OutlinedButton(onClick = { copyFunc(diagnosticsReport, "Full Report") }, modifier = Modifier.weight(1f)) {
+                                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(12.dp))
+                                    Text(" Full", fontSize = 9.sp)
+                                }
+                                OutlinedButton(onClick = { copyFunc(diagnosticsReport.filter { it.result == "Working" }, "Working") }, modifier = Modifier.weight(1f)) {
+                                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(12.dp))
+                                    Text(" Working", fontSize = 9.sp)
+                                }
+                                OutlinedButton(onClick = { copyFunc(diagnosticsReport.filter { it.result == "Failed" }, "Failed") }, modifier = Modifier.weight(1f)) {
+                                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(12.dp))
+                                    Text(" Failed", fontSize = 9.sp)
+                                }
+                            }
+                        }
+                    }
+
+                    if (isLoading) {
+                        Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                    } else if (fetchError != null) {
+                        Box(modifier = Modifier.fillMaxWidth().weight(1f).padding(24.dp), contentAlignment = Alignment.Center) {
+                            Text(fetchError!!, color = MaterialTheme.colorScheme.error)
+                        }
+                    } else {
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(1), modifier = Modifier.fillMaxWidth().weight(1f),
+                            contentPadding = PaddingValues(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            items(filteredChannels) { channel ->
+                                val channelLangId = channel.getIdForLanguage(if (selectedLanguage != "All Languages") selectedLanguage else channel.defaultLanguage)
+                                val isM3uFallback = smartCache[channelLangId]?.preferredSource == PlaybackSource.M3U
+
+                                LiveChannelRowItem(
+                                    channel = channel,
+                                    preSelectedLanguage = if (selectedLanguage != "All Languages") selectedLanguage else channel.defaultLanguage,
+                                    isM3uFallback = isM3uFallback,
+                                    onPlayRequested = { id ->
+                                        scope.launch {
                                             try {
-                                                val success = JioTvRepo.verifyOtp(context, mobile, otpCode)
-                                                if (success) {
-                                                    userAuthed = true
-                                                    Toast.makeText(context, "Logged in Successfully ✅", Toast.LENGTH_LONG).show()
-                                                }
+                                                val resolved = JioTvRepo.getResolvedLiveUrl(context, id, channel.title)
+                                                smartCache = JioTvRepo.getChannelCacheMap(context) // Refresh cache mapping in UI
+                                                pendingFeedbackChannel = channel
+                                                onPlayRequested(resolved.url, channel.title)
                                             } catch (e: Exception) {
-                                                Toast.makeText(context, e.message ?: "Verification Failed ❌", Toast.LENGTH_LONG).show()
+                                                val parts = e.message?.split("|")
+                                                val reason = parts?.getOrNull(0) ?: "Playback Failed"
+                                                if (reason.contains("Subscription", true) || parts?.getOrNull(1) == "403" || parts?.getOrNull(1) == "3012") {
+                                                    globalPaidChannels[id] = true
+                                                }
+                                                Toast.makeText(context, "$reason ❌", Toast.LENGTH_LONG).show()
                                             }
                                         }
                                     }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                LiveTab.JIO_LOGIN -> {
+                    Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.TopCenter) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(24.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f))
+                                .border(BorderStroke(0.5.dp, Color.White.copy(alpha = 0.1f)), RoundedCornerShape(24.dp))
+                                .padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            if (userAuthed) {
+                                Icon(Icons.Default.Lock, contentDescription = null, tint = Color.Green, modifier = Modifier.size(48.dp))
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text("Authenticated Session Secure", fontWeight = FontWeight.Black, fontSize = 16.sp)
+                                Button(
+                                    onClick = { JioTvRepo.logout(context); userAuthed = false },
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                                ) { Text("Revoke Login Session") }
+                            } else {
+                                var mobile by remember { mutableStateOf("") }
+                                var otpCode by remember { mutableStateOf("") }
+                                var isOtpSent by remember { mutableStateOf(false) }
+                                
+                                OutlinedTextField(value = mobile, onValueChange = { mobile = it }, label = { Text("Mobile Number") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                                if (isOtpSent) {
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    OutlinedTextField(value = otpCode, onValueChange = { otpCode = it }, label = { Text("Enter OTP Code") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                                 }
-                            ) { Text(if (!isOtpSent) "Send OTP Challenge" else "Verify Token") }
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Button(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    onClick = {
+                                        scope.launch {
+                                            if (!isOtpSent) {
+                                                try {
+                                                    val sent = JioTvRepo.requestOtp(mobile)
+                                                    isOtpSent = sent
+                                                    if (sent) {
+                                                        Toast.makeText(context, "OTP Sent Successfully ✅", Toast.LENGTH_SHORT).show()
+                                                    } else {
+                                                        Toast.makeText(context, "Failed to send OTP", Toast.LENGTH_LONG).show()
+                                                    }
+                                                } catch (e: Exception) {
+                                                    Toast.makeText(context, e.message ?: "Failed to send OTP", Toast.LENGTH_LONG).show()
+                                                }
+                                            } else {
+                                                try {
+                                                    val success = JioTvRepo.verifyOtp(context, mobile, otpCode)
+                                                    if (success) {
+                                                        userAuthed = true
+                                                        Toast.makeText(context, "Logged in Successfully ✅", Toast.LENGTH_LONG).show()
+                                                    }
+                                                } catch (e: Exception) {
+                                                    Toast.makeText(context, e.message ?: "Verification Failed ❌", Toast.LENGTH_LONG).show()
+                                                }
+                                            }
+                                        }
+                                    }
+                                ) { Text(if (!isOtpSent) "Send OTP Challenge" else "Verify Token") }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Lightweight User Feedback Prompt (Appears without interrupting the user when they return from playback)
+        AnimatedVisibility(
+            visible = pendingFeedbackChannel != null && smartCache[pendingFeedbackChannel?.defaultChannelId]?.userFeedback == null,
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter)
+        ) {
+            if (pendingFeedbackChannel != null) {
+                val channelId = pendingFeedbackChannel!!.defaultChannelId
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    elevation = CardDefaults.cardElevation(8.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth(0.9f).padding(bottom = 60.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("Did ${pendingFeedbackChannel!!.title} play correctly?", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Button(
+                                onClick = {
+                                    JioTvRepo.setUserFeedback(context, channelId, true)
+                                    smartCache = JioTvRepo.getChannelCacheMap(context)
+                                    pendingFeedbackChannel = null
+                                },
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50))
+                            ) { Text("👍 Yes") }
+                            
+                            Button(
+                                onClick = {
+                                    JioTvRepo.setUserFeedback(context, channelId, false)
+                                    smartCache = JioTvRepo.getChannelCacheMap(context)
+                                    pendingFeedbackChannel = null
+                                },
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE53935))
+                            ) { Text("👎 No") }
                         }
                     }
                 }
@@ -380,6 +431,7 @@ fun LiveTvTabScreen(
 fun LiveChannelRowItem(
     channel: LiveChannelItem, 
     preSelectedLanguage: String,
+    isM3uFallback: Boolean,
     onPlayRequested: (channelId: String) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -407,6 +459,12 @@ fun LiveChannelRowItem(
                         Spacer(modifier = Modifier.width(6.dp))
                         Surface(color = Color(0xFFD4AF37).copy(alpha = 0.2f), shape = RoundedCornerShape(4.dp)) {
                             Text(" 🟡 Paid ", fontSize = 9.sp, color = Color(0xFFFFD700), fontWeight = FontWeight.Bold, modifier = Modifier.padding(2.dp))
+                        }
+                    }
+                    if (isM3uFallback) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Surface(color = Color(0xFF4CAF50).copy(alpha = 0.2f), shape = RoundedCornerShape(4.dp)) {
+                            Text(" 🔄 Synced ", fontSize = 9.sp, color = Color(0xFF81C784), fontWeight = FontWeight.Bold, modifier = Modifier.padding(2.dp))
                         }
                     }
                 }
