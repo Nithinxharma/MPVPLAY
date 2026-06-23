@@ -29,7 +29,8 @@ data class EpgData(
     val startTimeMs: Long,
     val endTimeMs: Long,
     val nextProgramName: String,
-    val nextStartTimeMs: Long
+    val nextStartTimeMs: Long,
+    val description: String = "Live TV Broadcast"
 )
 
 data class DiagnosticResult(
@@ -40,5 +41,6 @@ data class DiagnosticResult(
     val result: String,
     val failureReason: String = "",
     val httpStatus: String = "",
-    val timeTakenMs: Long = 0L
+    val timeTakenMs: Long = 0L,
+    val resolvedUrl: String = ""
 )
