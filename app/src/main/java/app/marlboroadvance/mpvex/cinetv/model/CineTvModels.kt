@@ -11,18 +11,34 @@ data class ChannelVariant(
 )
 
 data class LiveChannelItem(
-    val defaultChannelId: String, // The ID to use if no specific variant is selected
+    val defaultChannelId: String,
     val title: String,
     val category: String,
     val defaultLanguage: String,
     val logoUrl: String,
     val streamUrlHash: String,
-    val variants: List<ChannelVariant> = emptyList(), // Holds all language variants
-    val currentProgram: String = "Live Broadcast Stream",
-    val programTime: String = "Now Playing"
+    val variants: List<ChannelVariant> = emptyList()
 ) {
-    // Helper to get channelId by language name
     fun getIdForLanguage(lang: String): String {
         return variants.find { it.language == lang }?.channelId ?: defaultChannelId
     }
 }
+
+data class EpgData(
+    val programName: String,
+    val startTimeMs: Long,
+    val endTimeMs: Long,
+    val nextProgramName: String,
+    val nextStartTimeMs: Long
+)
+
+data class DiagnosticResult(
+    val channelName: String,
+    val channelId: String,
+    val category: String,
+    val language: String,
+    val result: String,
+    val failureReason: String = "",
+    val httpStatus: String = "",
+    val timeTakenMs: Long = 0L
+)
