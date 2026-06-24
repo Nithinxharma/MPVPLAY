@@ -32,7 +32,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -152,6 +151,7 @@ fun LiveTvTabScreen(
         when (activeSubTab) {
             LiveTab.CHANNELS -> {
                 
+                // M3 Browser Top Bar / Search
                 OutlinedTextField(
                     value = localSearchQuery,
                     onValueChange = { localSearchQuery = it },
@@ -168,6 +168,7 @@ fun LiveTvTabScreen(
                     )
                 )
 
+                // Glassmorphism Genres
                 LazyRow(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -181,12 +182,12 @@ fun LiveTvTabScreen(
                                 containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.4f),
                                 selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
                             ),
-                            shape = CircleShape,
-                            border = FilterChipDefaults.filterChipBorder(borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                            shape = CircleShape
                         )
                     }
                 }
 
+                // Glassmorphism Languages
                 LazyRow(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -200,8 +201,7 @@ fun LiveTvTabScreen(
                                 containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.4f),
                                 selectedContainerColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.6f)
                             ),
-                            shape = CircleShape,
-                            border = FilterChipDefaults.filterChipBorder(borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                            shape = CircleShape
                         )
                     }
                 }
