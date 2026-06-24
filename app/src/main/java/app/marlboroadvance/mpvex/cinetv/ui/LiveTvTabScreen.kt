@@ -5,11 +5,15 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
 import androidx.compose.animation.*
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -27,7 +31,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -37,6 +43,8 @@ import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
 import app.marlboroadvance.mpvex.cinetv.data.JioTvRepo
 import app.marlboroadvance.mpvex.cinetv.model.*
+import java.text.SimpleDateFormat
+import java.util.*
 
 val globalPaidChannels = mutableStateMapOf<String, Boolean>()
 
@@ -48,38 +56,31 @@ fun LiveTvTabScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior(rememberTopAppBarState())
 
     var activeSubTab by remember { mutableStateOf(LiveTab.CHANNELS) }
     var userAuthed by remember { mutableStateOf(JioTvRepo.isUserLoggedIn()) }
 
     var allChannels by remember { mutableStateOf(emptyList<LiveChannelItem>()) }
     var isLoading by remember { mutableStateOf(true) }
-    var fetchError by remember { mutableStateOf<String?>(null) } 
 
     var localSearchQuery by remember { mutableStateOf("") }
     var selectedGenre by remember { mutableStateOf("All") }
     var selectedLanguage by remember { mutableStateOf("All Languages") }
-    var languageExpanded by remember { mutableStateOf(false) }
 
     var smartCache by remember { mutableStateOf(mapOf<String, ChannelCacheEntry>()) }
     
-    // Core Feedback Detector Mechanism
-    var pendingFeedbackData by remember { mutableStateOf<Pair<LiveChannelItem, String>?>(null) }
+    // Multiple Stream Collision Dialog
+    var showStreamChooserFor by remember { mutableStateOf<Pair<LiveChannelItem, List<M3uMatchCandidate>>?>(null) }
 
     LaunchedEffect(Unit) {
         JioTvRepo.initTokens(context)
         userAuthed = JioTvRepo.isUserLoggedIn()
         smartCache = JioTvRepo.getChannelCacheMap(context)
-
         isLoading = true
         try {
-            fetchError = null
             allChannels = JioTvRepo.fetchLiveChannelsFromAssets(context)
-        } catch (e: Exception) {
-            fetchError = e.message ?: "An unknown error occurred while downloading channels"
-        } finally {
-            isLoading = false
-        }
+        } catch (e: Exception) { } finally { isLoading = false }
     }
 
     val availableGenres = remember(allChannels) { listOf("All") + allChannels.map { it.category }.distinct().sorted() }
@@ -95,11 +96,14 @@ fun LiveTvTabScreen(
 
             val cacheEntry = smartCache[channel.defaultChannelId]
             val aliasName = cacheEntry?.mappedM3uName?.lowercase() ?: ""
+            val manualUrl = cacheEntry?.manualStreamUrl?.lowercase() ?: ""
 
             val matchesSearch = searchLower.isBlank() || 
                 channel.title.lowercase().contains(searchLower) || 
                 channel.category.lowercase().contains(searchLower) ||
                 aliasName.contains(searchLower) ||
+                manualUrl.contains(searchLower) ||
+                (cacheEntry?.status == MappingStatus.BROKEN && searchLower == "broken") ||
                 channel.variants.any { it.language.lowercase().contains(searchLower) }
 
             matchesGenre && matchesLanguage && matchesSearch
@@ -111,298 +115,242 @@ fun LiveTvTabScreen(
             try {
                 val resolved = JioTvRepo.getResolvedLiveUrl(context, idToPlay, channel.title)
                 JioTvRepo.lastResolvedHeaders = resolved.headers
-                
-                val cacheEntry = smartCache[idToPlay]
-                if (cacheEntry?.userVerified != true) {
-                    pendingFeedbackData = channel to resolved.url
-                } else {
-                    pendingFeedbackData = null
-                }
-                
                 onPlayRequested(resolved.url, channel.title)
+            } catch (e: MultipleStreamsException) {
+                showStreamChooserFor = channel to e.candidates
             } catch (e: Exception) {
-                Toast.makeText(context, "No working streams found for ${channel.title}", Toast.LENGTH_SHORT).show()
-                pendingFeedbackData = null
+                Toast.makeText(context, "No working streams found.", Toast.LENGTH_SHORT).show()
             }
         }
     }
 
-    if (pendingFeedbackData != null) {
-        val (channelToFeed, playedUrl) = pendingFeedbackData!!
-        AlertDialog(
-            onDismissRequest = { /* Must force interaction */ },
-            title = { Text("Playback Feedback") },
-            text = { Text("Did ${channelToFeed.title} play correctly?\n\n(Wait for stream to load. Video must render and audio must start.)") },
-            confirmButton = {
-                Button(onClick = {
-                    JioTvRepo.handleUserPlaybackFeedback(context, channelToFeed.defaultChannelId, true, playedUrl, channelToFeed.title)
-                    smartCache = JioTvRepo.getChannelCacheMap(context)
-                    pendingFeedbackData = null
-                }) { Text("Yes") }
-            },
-            dismissButton = {
-                Button(onClick = {
-                    JioTvRepo.handleUserPlaybackFeedback(context, channelToFeed.defaultChannelId, false, playedUrl, channelToFeed.title)
-                    smartCache = JioTvRepo.getChannelCacheMap(context)
-                    pendingFeedbackData = null
-                    
-                    Toast.makeText(context, "Searching alternative stream...", Toast.LENGTH_SHORT).show()
-                    playChannel(channelToFeed, channelToFeed.defaultChannelId) 
-                }) { Text("No") }
-            }
-        )
-    }
-
-    Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        TabRow(selectedTabIndex = activeSubTab.ordinal, containerColor = Color.Transparent, divider = {}) {
-            LiveTab.values().forEach { tab ->
-                Tab(
-                    selected = activeSubTab == tab,
-                    onClick = { activeSubTab = tab },
-                    text = { Text(tab.label, fontWeight = FontWeight.Bold, fontSize = 12.sp) }
-                )
-            }
-        }
-
-        when (activeSubTab) {
-            LiveTab.CHANNELS -> {
-                OutlinedTextField(
-                    value = localSearchQuery,
-                    onValueChange = { localSearchQuery = it },
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                    placeholder = { Text("Search channels, categories, aliases...", color = MaterialTheme.colorScheme.onSurfaceVariant) },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-                    shape = CircleShape,
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
-                        unfocusedBorderColor = Color.Transparent
-                    )
-                )
-
-                                            LazyRow(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(items = availableGenres) { genre ->
-                        FilterChip(
-                            selected = selectedGenre == genre,
-                            onClick = { selectedGenre = genre },
-                            label = { Text(genre, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.4f),
-                                selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
-                            ),
-                            shape = CircleShape
-                        )
+    if (showStreamChooserFor != null) {
+        val (channel, candidates) = showStreamChooserFor!!
+        ModalBottomSheet(onDismissRequest = { showStreamChooserFor = null }) {
+            Column(Modifier.padding(16.dp)) {
+                Text("Multiple Streams Found", fontWeight = FontWeight.Black, fontSize = 20.sp)
+                Text("Select preferred source for ${channel.title}", color = Color.Gray, fontSize = 14.sp)
+                Spacer(Modifier.height(16.dp))
+                LazyColumn {
+                    items(candidates) { candidate ->
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable {
+                                scope.launch {
+                                    JioTvRepo.lastResolvedHeaders = candidate.headers
+                                    onPlayRequested(candidate.url, channel.title)
+                                    // Pre-emptively assign this as chosen map override to prevent dialog again
+                                    JioTvRepo.saveManualMapping(context, channel.defaultChannelId, channel.title, candidate.mappedName, null)
+                                    smartCache = JioTvRepo.getChannelCacheMap(context)
+                                    showStreamChooserFor = null
+                                }
+                            },
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                        ) {
+                            Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                AsyncImage(model = channel.logoUrl, contentDescription = null, modifier = Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)))
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(candidate.mappedName, fontWeight = FontWeight.Bold)
+                                    Row {
+                                        Text(candidate.resolution, color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        Text(" • M3U", color = Color.Gray, fontSize = 12.sp)
+                                    }
+                                }
+                                Icon(Icons.Default.PlayArrow, null, tint = MaterialTheme.colorScheme.primary)
+                            }
+                        }
                     }
                 }
+                Spacer(Modifier.height(32.dp))
+            }
+        }
+    }
 
+    Scaffold(
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            LargeTopAppBar(
+                title = {
+                    Column {
+                        Text("CINE TV", fontWeight = FontWeight.Black, fontSize = 28.sp)
+                        Text("Live TV", fontSize = 14.sp, color = MaterialTheme.colorScheme.primary)
+                    }
+                },
+                actions = {
+                    Box(modifier = Modifier.padding(end = 16.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.35f)).clickable { /* Search Action if needed */ }.padding(8.dp)) {
+                        Icon(Icons.Default.Search, null, tint = Color.White)
+                    }
+                },
+                colors = TopAppBarDefaults.largeTopAppBarColors(
+                    containerColor = Color.Black.copy(alpha = 0.35f),
+                    scrolledContainerColor = Color.Black.copy(alpha = 0.6f)
+                ),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp))
+                    .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp))
+            )
+        }
+    ) { innerPadding ->
+        Column(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+            TabRow(selectedTabIndex = activeSubTab.ordinal, containerColor = Color.Transparent, divider = {}) {
+                LiveTab.values().forEach { tab ->
+                    Tab(selected = activeSubTab == tab, onClick = { activeSubTab = tab }, text = { Text(tab.label, fontWeight = FontWeight.Bold) })
+                }
+            }
 
-       
-
-                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-                    ExposedDropdownMenuBox(
-                        expanded = languageExpanded, 
-                        onExpandedChange = { languageExpanded = it }, 
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        OutlinedTextField(
-                            value = selectedLanguage, onValueChange = {}, readOnly = true,
-                            label = { Text("Select Language", fontSize = 12.sp) },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = languageExpanded) },
-                            modifier = Modifier.menuAnchor().fillMaxWidth(),
-                            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp)
+            when (activeSubTab) {
+                LiveTab.CHANNELS -> {
+                    // Glassmorphism Search Bar
+                    OutlinedTextField(
+                        value = localSearchQuery,
+                        onValueChange = { localSearchQuery = it },
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        placeholder = { Text("Search by name, alias, manual URL...") },
+                        leadingIcon = { Icon(Icons.Default.Search, null) },
+                        shape = RoundedCornerShape(24.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = Color.Black.copy(alpha = 0.35f),
+                            unfocusedContainerColor = Color.Black.copy(alpha = 0.35f),
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.1f)
                         )
-                        ExposedDropdownMenu(expanded = languageExpanded, onDismissRequest = { languageExpanded = false }) {
-                            availableLanguages.forEach { lang ->
-                                DropdownMenuItem(text = { Text(lang, fontSize = 12.sp) }, onClick = { selectedLanguage = lang; languageExpanded = false })
+                    )
+
+                    LazyRow(modifier = Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(items = availableGenres) { genre ->
+                            FilterChip(selected = selectedGenre == genre, onClick = { selectedGenre = genre }, label = { Text(genre) }, shape = CircleShape)
+                        }
+                    }
+
+                    if (isLoading) {
+                        Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                    } else {
+                        LazyVerticalGrid(columns = GridCells.Fixed(1), modifier = Modifier.weight(1f), contentPadding = PaddingValues(14.dp)) {
+                            items(items = filteredChannels) { channel ->
+                                val channelLangId = channel.getIdForLanguage(if (selectedLanguage != "All Languages") selectedLanguage else channel.defaultLanguage)
+                                val entry = smartCache[channelLangId]
+
+                                LiveChannelRowItem(
+                                    channel = channel,
+                                    currentActiveId = channelLangId,
+                                    entry = entry,
+                                    onPlayRequested = { id -> playChannel(channel, id) }
+                                )
                             }
                         }
                     }
                 }
 
-                if (isLoading) {
-                    Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-                } else if (fetchError != null) {
-                    Box(modifier = Modifier.fillMaxWidth().weight(1f).padding(24.dp), contentAlignment = Alignment.Center) {
-                        Text(fetchError!!, color = MaterialTheme.colorScheme.error)
-                    }
-                } else {
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(1), modifier = Modifier.fillMaxWidth().weight(1f),
-                        contentPadding = PaddingValues(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        items(items = filteredChannels) { channel ->
-                            val channelLangId = channel.getIdForLanguage(if (selectedLanguage != "All Languages") selectedLanguage else channel.defaultLanguage)
-                            val entry = smartCache[channelLangId]
-
-                            LiveChannelRowItem(
-                                channel = channel,
-                                currentActiveId = channelLangId,
-                                isM3uFallback = entry?.preferredSource == PlaybackSource.M3U,
-                                confidenceScore = entry?.confidenceScore ?: 0,
-                                isManualMapping = entry?.isManualMapping ?: false,
-                                onPlayRequested = { id -> playChannel(channel, id) }
-                            )
-                        }
-                    }
-                }
-            }
-
-            LiveTab.JIO_LOGIN -> {
-                LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    item {
-                        Column(
-                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f))
-                                .border(BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.1f)), RoundedCornerShape(24.dp))
-                                .padding(24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            if (userAuthed) {
-                                Icon(Icons.Default.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(48.dp))
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Text("Authenticated Session Secure", fontWeight = FontWeight.Black, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
-                                Button(
-                                    onClick = { JioTvRepo.logout(context); userAuthed = false },
-                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                                ) { Text("Revoke Login Session") }
-                            } else {
-                                var mobile by remember { mutableStateOf("") }
-                                var otpCode by remember { mutableStateOf("") }
-                                var isOtpSent by remember { mutableStateOf(false) }
+                LiveTab.JIO_LOGIN -> {
+                    LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        // Direct URL Mode Sync
+                        item {
+                            Column(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color.Black.copy(alpha = 0.35f)).border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(18.dp)).padding(20.dp)) {
+                                Text("Sync Playlist (Direct URL)", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                Spacer(Modifier.height(8.dp))
+                                var m3uUrl by remember { mutableStateOf("") }
+                                OutlinedTextField(value = m3uUrl, onValueChange = { m3uUrl = it }, placeholder = { Text("https://abc.xyz/live.m3u") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                                Spacer(Modifier.height(8.dp))
+                                Button(onClick = {
+                                    scope.launch {
+                                        Toast.makeText(context, "Downloading...", Toast.LENGTH_SHORT).show()
+                                        val success = JioTvRepo.syncPlaylistFromUrl(context, m3uUrl)
+                                        if (success) {
+                                            JioTvRepo.reloadM3uParser()
+                                            Toast.makeText(context, "✓ Synced Successfully", Toast.LENGTH_LONG).show()
+                                        } else Toast.makeText(context, "Failed to sync", Toast.LENGTH_SHORT).show()
+                                    }
+                                }, modifier = Modifier.fillMaxWidth()) { Text("SYNC") }
                                 
-                                OutlinedTextField(value = mobile, onValueChange = { mobile = it }, label = { Text("Mobile Number") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                                if (isOtpSent) {
-                                    Spacer(modifier = Modifier.height(10.dp))
-                                    OutlinedTextField(value = otpCode, onValueChange = { otpCode = it }, label = { Text("Enter OTP Code") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                                val meta = remember { JioTvRepo.getPlaylistMeta(context) }
+                                if (meta.channelCount > 0) {
+                                    Spacer(Modifier.height(16.dp))
+                                    Text("Playlist: ${meta.name}", fontSize = 12.sp)
+                                    Text("Channels: ${meta.channelCount}", fontSize = 12.sp)
+                                    val dateStr = SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()).format(Date(meta.lastUpdated))
+                                    Text("Last Updated: $dateStr", fontSize = 12.sp, color = Color.Gray)
                                 }
-                                Spacer(modifier = Modifier.height(16.dp))
+                            }
+                            Spacer(Modifier.height(16.dp))
+                        }
+
+                        // Local File Mode
+                        item {
+                            Column(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color.Black.copy(alpha = 0.35f)).border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(18.dp)).padding(20.dp)) {
+                                Text("Local File Mode", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                Row(modifier = Modifier.horizontalScroll(rememberScrollState()).padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    OutlinedButton(onClick = { /* Import Logic */ }) { Text("Import") }
+                                    OutlinedButton(onClick = { /* Replace Logic */ }) { Text("Replace") }
+                                    OutlinedButton(onClick = { /* Export Logic */ }) { Text("Export") }
+                                }
+                            }
+                            Spacer(Modifier.height(16.dp))
+                        }
+
+                        // Manual Mapping UI
+                        item {
+                            Column(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color.Black.copy(alpha = 0.35f)).border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(18.dp)).padding(20.dp)) {
+                                Text("Map Jio Channels", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                var jioQuery by remember { mutableStateOf("") }
+                                var customUrl by remember { mutableStateOf("") }
+                                var jioId by remember { mutableStateOf("") }
+                                
+                                OutlinedTextField(value = jioQuery, onValueChange = { jioQuery = it }, label = { Text("Search Jio Channel") }, modifier = Modifier.fillMaxWidth())
+                                // Dummy selection logic for UX completeness
+                                val match = allChannels.find { it.title.contains(jioQuery, true) }
+                                if (match != null && jioQuery.isNotBlank()) {
+                                    Text("Target: ${match.title}", color = Color.Green, fontSize = 12.sp)
+                                    jioId = match.defaultChannelId
+                                }
+                                
+                                Spacer(Modifier.height(8.dp))
+                                OutlinedTextField(value = customUrl, onValueChange = { customUrl = it }, label = { Text("Paste Stream URL or M3U Name") }, modifier = Modifier.fillMaxWidth())
+                                Spacer(Modifier.height(8.dp))
                                 Button(
-                                    modifier = Modifier.fillMaxWidth(),
+                                    enabled = jioId.isNotBlank() && customUrl.isNotBlank(),
                                     onClick = {
-                                        scope.launch {
-                                            if (!isOtpSent) {
-                                                try {
-                                                    val sent = JioTvRepo.requestOtp(mobile)
-                                                    isOtpSent = sent
-                                                    if (sent) Toast.makeText(context, "OTP Sent", Toast.LENGTH_SHORT).show()
-                                                } catch (e: Exception) {
-                                                    Toast.makeText(context, e.message ?: "Failed", Toast.LENGTH_LONG).show()
-                                                }
-                                            } else {
-                                                try {
-                                                    val success = JioTvRepo.verifyOtp(context, mobile, otpCode)
-                                                    if (success) userAuthed = true
-                                                } catch (e: Exception) {
-                                                    Toast.makeText(context, e.message ?: "Verification Failed", Toast.LENGTH_LONG).show()
-                                                }
+                                        val isUrl = customUrl.startsWith("http")
+                                        JioTvRepo.saveManualMapping(context, jioId, match!!.title, if (!isUrl) customUrl else null, if (isUrl) customUrl else null)
+                                        smartCache = JioTvRepo.getChannelCacheMap(context)
+                                        Toast.makeText(context, "Saved", Toast.LENGTH_SHORT).show()
+                                    }, modifier = Modifier.fillMaxWidth()
+                                ) { Text("Save Mapping") }
+                            }
+                            Spacer(Modifier.height(24.dp))
+                        }
+
+                        // Saved Streams Status
+                        item { Text("Mapping Status", fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.Start)) }
+                        
+                        items(smartCache.values.toList()) { mapping ->
+                            val channel = allChannels.find { it.defaultChannelId == mapping.channelId }
+                            if (channel != null) {
+                                Card(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                    colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.2f)),
+                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
+                                ) {
+                                    Column(Modifier.padding(12.dp)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            AsyncImage(model = channel.logoUrl, contentDescription = null, modifier = Modifier.size(36.dp).clip(RoundedCornerShape(8.dp)))
+                                            Spacer(Modifier.width(12.dp))
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(channel.title, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                                                Text("Mapped: ${mapping.mappedM3uName ?: mapping.manualStreamUrl ?: "Original Jio"}", fontSize = 11.sp, color = Color.Gray)
+                                                Text("Source: ${mapping.preferredSource.name} | Status: ${mapping.status.name}", fontSize = 10.sp, color = if(mapping.status == MappingStatus.BROKEN) Color.Red else MaterialTheme.colorScheme.primary)
                                             }
                                         }
-                                    }
-                                ) { Text(if (!isOtpSent) "Send OTP" else "Verify Token") }
-                            }
-                        }
-                    }
-                    
-                    item { Spacer(Modifier.height(32.dp)) }
-                    
-                    item {
-                        Text("Saved Stream Mappings", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.height(16.dp))
-                    }
-                    
-                    val verifiedMappings = smartCache.values.filter { it.userVerified }
-                    if (verifiedMappings.isEmpty()) {
-                        item { Text("No verified mappings yet.", color = Color.Gray, modifier = Modifier.padding(bottom = 16.dp)) }
-                    } else {
-                        items(verifiedMappings.toList()) { mapping ->
-                            val channel = allChannels.find { it.defaultChannelId == mapping.channelId }
-                            Card(
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                            ) {
-                                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    AsyncImage(model = channel?.logoUrl, contentDescription = null, modifier = Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)))
-                                    Spacer(Modifier.width(12.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(channel?.title ?: mapping.channelId, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                                        Text("Mapped: ${mapping.mappedM3uName ?: "Jio Official"}", fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary)
-                                    }
-                                    IconButton(onClick = { if (channel != null) playChannel(channel, channel.defaultChannelId) }) {
-                                        Icon(Icons.Default.PlayArrow, contentDescription = "Play", tint = MaterialTheme.colorScheme.primary)
-                                    }
-                                    IconButton(onClick = {
-                                        JioTvRepo.resetMapping(context, mapping.channelId)
-                                        smartCache = JioTvRepo.getChannelCacheMap(context)
-                                        Toast.makeText(context, "Mapping Reset!", Toast.LENGTH_SHORT).show()
-                                    }) {
-                                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
+                                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                            TextButton(onClick = { playChannel(channel, channel.defaultChannelId) }) { Text("Test") }
+                                            TextButton(onClick = { JioTvRepo.removeManualMapping(context, mapping.channelId); smartCache = JioTvRepo.getChannelCacheMap(context) }) { Text("Delete", color = Color.Red) }
+                                            TextButton(onClick = { 
+                                                val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                                cb.setPrimaryClip(ClipData.newPlainText("URL", mapping.manualStreamUrl ?: mapping.lastSuccessfulUrl ?: ""))
+                                                Toast.makeText(context, "Copied URL", Toast.LENGTH_SHORT).show()
+                                            }) { Text("Copy") }
+                                        }
                                     }
                                 }
-                            }
-                        }
-                    }
-                    
-                    item { Spacer(Modifier.height(32.dp)) }
-                    
-                    item {
-                        Text("Manage in.m3u", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.height(16.dp))
-                    }
-                    
-                    item {
-                        var m3uText by remember { mutableStateOf("") }
-                        var showEditor by remember { mutableStateOf(false) }
-                        
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
-                            Button(onClick = { 
-                                val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                val text = cb.primaryClip?.getItemAt(0)?.text?.toString()
-                                if (!text.isNullOrBlank() && text.contains("#EXTM3U")) {
-                                    JioTvRepo.saveM3uText(context, text)
-                                    JioTvRepo.reloadM3uParser()
-                                    Toast.makeText(context, "Imported from clipboard!", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    Toast.makeText(context, "No valid M3U in clipboard", Toast.LENGTH_SHORT).show()
-                                }
-                            }) { Text("Import/Replace") }
-                            
-                            Button(onClick = { 
-                                val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                cb.setPrimaryClip(ClipData.newPlainText("M3U", JioTvRepo.readM3uText(context)))
-                                Toast.makeText(context, "Exported to clipboard!", Toast.LENGTH_SHORT).show()
-                            }) { Text("Export") }
-                            
-                            Button(onClick = { 
-                                JioTvRepo.reloadM3uParser()
-                                Toast.makeText(context, "Parser Reloaded", Toast.LENGTH_SHORT).show()
-                            }) { Text("Reload") }
-                            
-                            Button(onClick = { 
-                                m3uText = JioTvRepo.readM3uText(context)
-                                showEditor = !showEditor
-                            }) { Text(if (showEditor) "Close Editor" else "Open as text") }
-                        }
-                        
-                        if (showEditor) {
-                            Spacer(Modifier.height(8.dp))
-                            OutlinedTextField(
-                                value = m3uText,
-                                onValueChange = { m3uText = it },
-                                modifier = Modifier.fillMaxWidth().height(300.dp),
-                                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 10.sp)
-                            )
-                            Button(onClick = {
-                                JioTvRepo.saveM3uText(context, m3uText)
-                                JioTvRepo.reloadM3uParser()
-                                Toast.makeText(context, "Saved & Reloaded", Toast.LENGTH_SHORT).show()
-                                showEditor = false
-                            }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                                Text("Save Changes")
                             }
                         }
                     }
@@ -416,22 +364,23 @@ fun LiveTvTabScreen(
 fun LiveChannelRowItem(
     channel: LiveChannelItem, 
     currentActiveId: String,
-    isM3uFallback: Boolean,
-    confidenceScore: Int,
-    isManualMapping: Boolean,
+    entry: ChannelCacheEntry?,
     onPlayRequested: (channelId: String) -> Unit
 ) {
-    val isPaid = globalPaidChannels[currentActiveId] == true
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(targetValue = if (isPressed) 1.02f else 1f, animationSpec = tween(180))
 
     Card(
-        modifier = Modifier.fillMaxWidth().clickable { onPlayRequested(currentActiveId) },
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+        modifier = Modifier.fillMaxWidth().scale(scale).clickable(interactionSource = interactionSource, indication = LocalIndication.current) { onPlayRequested(currentActiveId) },
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.35f)),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
     ) {
         Row(modifier = Modifier.padding(12.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             AsyncImage(
                 model = channel.logoUrl, contentDescription = channel.title,
-                modifier = Modifier.size(52.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surface).padding(4.dp),
+                modifier = Modifier.size(52.dp).clip(RoundedCornerShape(10.dp)).background(Color.Black.copy(alpha = 0.5f)).padding(4.dp),
                 contentScale = ContentScale.Fit
             )
             Spacer(modifier = Modifier.width(14.dp))
@@ -440,13 +389,13 @@ fun LiveChannelRowItem(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("${channel.category} • ${channel.variants.find { it.channelId == currentActiveId }?.language ?: channel.defaultLanguage}", 
                          fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
-                    if (isPaid) {
+                    
+                    if (entry?.status == MappingStatus.BROKEN) {
                         Spacer(modifier = Modifier.width(6.dp))
-                        Surface(color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f), shape = RoundedCornerShape(4.dp)) {
-                            Text(" 🟡 Paid ", fontSize = 9.sp, color = MaterialTheme.colorScheme.tertiary, fontWeight = FontWeight.Bold, modifier = Modifier.padding(2.dp))
+                        Surface(color = Color.Red.copy(alpha = 0.2f), shape = RoundedCornerShape(4.dp)) {
+                            Text(" ⚠ Broken ", fontSize = 9.sp, color = Color.Red, fontWeight = FontWeight.Bold, modifier = Modifier.padding(2.dp))
                         }
-                    }
-                    if (isM3uFallback) {
+                    } else if (entry?.preferredSource == PlaybackSource.M3U || entry?.preferredSource == PlaybackSource.MANUAL_URL) {
                         Spacer(modifier = Modifier.width(6.dp))
                         Surface(color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f), shape = RoundedCornerShape(4.dp)) {
                             Text(" ✓ Synced ", fontSize = 9.sp, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold, modifier = Modifier.padding(2.dp))
