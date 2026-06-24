@@ -2,7 +2,7 @@ package app.marlboroadvance.mpvex.cinetv.model
 
 enum class LiveTab(val label: String) {
     CHANNELS("Live Channels"),
-    JIO_LOGIN("Jio Authentication")
+    JIO_LOGIN("Stream Manager")
 }
 
 data class ChannelVariant(
@@ -41,7 +41,8 @@ enum class PlaybackSource { JIO_TV, M3U }
 data class ResolvedStream(
     val url: String,
     val source: PlaybackSource,
-    val headers: Map<String, String> = emptyMap()
+    val headers: Map<String, String> = emptyMap(),
+    val mappedName: String = ""
 )
 
 data class ChannelCacheEntry(
@@ -56,5 +57,6 @@ data class ChannelCacheEntry(
     var mappedM3uName: String? = null,
     var confidenceScore: Int = 0,
     var isManualMapping: Boolean = false,
-    var userVerified: Boolean = false
+    var userVerified: Boolean = false,
+    var failedM3uUrls: List<String> = emptyList() 
 )
