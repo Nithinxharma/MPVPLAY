@@ -32,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -151,7 +152,6 @@ fun LiveTvTabScreen(
         when (activeSubTab) {
             LiveTab.CHANNELS -> {
                 
-                // M3 Browser Top Bar / Search
                 OutlinedTextField(
                     value = localSearchQuery,
                     onValueChange = { localSearchQuery = it },
@@ -168,7 +168,6 @@ fun LiveTvTabScreen(
                     )
                 )
 
-                // Glassmorphism Genres
                 LazyRow(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -182,12 +181,12 @@ fun LiveTvTabScreen(
                                 containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.4f),
                                 selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
                             ),
-                            shape = CircleShape
+                            shape = CircleShape,
+                            border = FilterChipDefaults.filterChipBorder(borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
                         )
                     }
                 }
 
-                // Glassmorphism Languages
                 LazyRow(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -201,13 +200,14 @@ fun LiveTvTabScreen(
                                 containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.4f),
                                 selectedContainerColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.6f)
                             ),
-                            shape = CircleShape
+                            shape = CircleShape,
+                            border = FilterChipDefaults.filterChipBorder(borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
                         )
                     }
                 }
 
                 Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Developer Mode", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                    Text("Developer Mode", fontSize = 10.sp, color = Color.Gray, modifier = Modifier.weight(1f))
                     Switch(checked = showDiagnostics, onCheckedChange = { showDiagnostics = it }, modifier = Modifier.scale(0.7f))
                 }
 
@@ -355,9 +355,9 @@ fun LiveTvTabScreen(
                                             smartCache = JioTvRepo.getChannelCacheMap(context) 
                                             pendingFeedbackChannel = channel
                                             
-                                            // Make headers available globally for the PlayerActivity
                                             JioTvRepo.lastResolvedHeaders = resolved.headers
                                             
+                                            // Fallback to legacy signature for MainScreen
                                             onPlayRequested(resolved.url, channel.title)
                                         } catch (e: Exception) {
                                             val parts = e.message?.split("|")
