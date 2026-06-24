@@ -40,7 +40,8 @@ enum class PlaybackSource { JIO_TV, M3U }
 
 data class ResolvedStream(
     val url: String,
-    val source: PlaybackSource
+    val source: PlaybackSource,
+    val headers: Map<String, String> = emptyMap()
 )
 
 data class ChannelCacheEntry(
