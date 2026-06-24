@@ -21,7 +21,6 @@ jobs:
           java-version: "17"
           distribution: "temurin"
 
-      # Cache Gradle
       - name: Cache Gradle Packages & Build Cache
         uses: actions/cache@v4
         with:
@@ -36,26 +35,27 @@ jobs:
       - name: Grant Execute Permission
         run: chmod +x gradlew
 
-      # Decode Release Keystore
       - name: Decode Release Keystore
         run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > app/release.jks
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > release.jks
 
-      # Build Signed Release APK
-      - name: Build Release APK
+      - name: Verify Keystore
+        run: |
+          ls -lah
+          test -f release.jks
+
+      - name: Build Signed Release APK
         env:
-          KEYSTORE_FILE: app/release.jks
+          KEYSTORE_FILE: release.jks
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           ./gradlew assembleRelease --build-cache --configuration-cache --parallel
 
-      # Upload APK
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
         with:
           name: MPVPLAY-release-apk
-          path: |
-            app/build/outputs/apk/release/*.apk
+          path: app/build/outputs/apk/release/*.apk
           retention-days: 7
