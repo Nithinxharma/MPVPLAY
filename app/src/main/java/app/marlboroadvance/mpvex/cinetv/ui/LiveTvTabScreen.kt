@@ -168,43 +168,53 @@ fun LiveTvTabScreen(
                     )
                 )
 
-                LazyRow(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(items = availableGenres) { genre ->
-                        FilterChip(
-                            selected = selectedGenre == genre,
-                            onClick = { selectedGenre = genre },
-                            label = { Text(genre, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.4f),
-                                selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
-                            ),
-                            shape = CircleShape,
-                            border = FilterChipDefaults.filterChipBorder(borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
-                        )
-                    }
-                }
+                // M3 Filter Chips for Genres
+LazyRow(
+    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+    horizontalArrangement = Arrangement.spacedBy(8.dp)
+) {
+    items(items = availableGenres) { genre ->
+        FilterChip(
+            selected = selectedGenre == genre,
+            onClick = { selectedGenre = genre },
+            label = { Text(genre, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface) },
+            colors = FilterChipDefaults.filterChipColors(
+                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.4f),
+                selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+            ),
+            shape = CircleShape,
+            border = FilterChipDefaults.filterChipBorder(enabled = true, selected = selectedGenre == genre)
+        )
+    }
+}
 
-                LazyRow(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(items = availableLanguages) { lang ->
-                        FilterChip(
-                            selected = selectedLanguage == lang,
-                            onClick = { selectedLanguage = lang },
-                            label = { Text(lang, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.4f),
-                                selectedContainerColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.6f)
-                            ),
-                            shape = CircleShape,
-                            border = FilterChipDefaults.filterChipBorder(borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
-                        )
-                    }
-                }
+// M3 Language Dropdown
+Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+    ExposedDropdownMenuBox(
+        expanded = languageExpanded, 
+        onExpandedChange = { languageExpanded = it }, 
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        OutlinedTextField(
+            value = selectedLanguage, 
+            onValueChange = {}, 
+            readOnly = true,
+            label = { Text("Select Language") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = languageExpanded) },
+            modifier = Modifier.menuAnchor().fillMaxWidth(), 
+            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp)
+        )
+        ExposedDropdownMenu(expanded = languageExpanded, onDismissRequest = { languageExpanded = false }) {
+            availableLanguages.forEach { lang ->
+                DropdownMenuItem(
+                    text = { Text(lang, fontSize = 12.sp) }, 
+                    onClick = { selectedLanguage = lang; languageExpanded = false }
+                )
+            }
+        }
+    }
+}
+
 
                 Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("Developer Mode", fontSize = 10.sp, color = Color.Gray, modifier = Modifier.weight(1f))
