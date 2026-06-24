@@ -35,6 +35,9 @@ object JioTvRepo {
     
     @Volatile private var cachedToken: String = ""
     @Volatile private var cachedCrm: String = ""
+    
+    // Holds the headers for the actively resolving stream so PlayerActivity can access them
+    @Volatile var lastResolvedHeaders: Map<String, String> = emptyMap()
 
     private const val JIO_USER_AGENT = "plaYtv/7.0.8 (Linux;Android 9) ExoPlayerLib/2.11.7"
 
