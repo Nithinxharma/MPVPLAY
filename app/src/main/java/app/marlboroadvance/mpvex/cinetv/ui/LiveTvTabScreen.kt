@@ -10,12 +10,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
@@ -24,14 +23,13 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -48,8 +46,7 @@ val globalPaidChannels = mutableStateMapOf<String, Boolean>()
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LiveTvTabScreen(
-    searchQuery: String,
-    onPlayRequested: (streamUrl: String, channelTitle: String) -> Unit
+    onPlayRequested: (streamUrl: String, channelTitle: String, headers: Map<String, String>) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -61,9 +58,9 @@ fun LiveTvTabScreen(
     var isLoading by remember { mutableStateOf(true) }
     var fetchError by remember { mutableStateOf<String?>(null) } 
 
+    var localSearchQuery by remember { mutableStateOf("") }
     var selectedGenre by remember { mutableStateOf("All") }
     var selectedLanguage by remember { mutableStateOf("All Languages") }
-    var languageExpanded by remember { mutableStateOf(false) }
 
     var smartCache by remember { mutableStateOf(mapOf<String, ChannelCacheEntry>()) }
     var pendingFeedbackChannel by remember { mutableStateOf<LiveChannelItem?>(null) }
@@ -92,21 +89,25 @@ fun LiveTvTabScreen(
     val availableGenres = remember(allChannels) { listOf("All") + allChannels.map { it.category }.distinct().sorted() }
     val availableLanguages = remember(allChannels) { listOf("All Languages") + allChannels.flatMap { it.variants.map { v -> v.language } }.distinct().sorted() }
 
-    val filteredChannels = remember(allChannels, selectedGenre, selectedLanguage, searchQuery) {
+    val filteredChannels = remember(allChannels, selectedGenre, selectedLanguage, localSearchQuery) {
         allChannels.filter { channel ->
             val matchesGenre = selectedGenre == "All" || channel.category == selectedGenre
             val matchesLanguage = selectedLanguage == "All Languages" || channel.variants.any { it.language.equals(selectedLanguage, true) }
-            val searchLower = searchQuery.trim().lowercase()
+            val searchLower = localSearchQuery.trim().lowercase()
+            
+            val cacheEntry = smartCache[channel.defaultChannelId]
+            val aliasName = cacheEntry?.mappedM3uName?.lowercase() ?: ""
+            
             val matchesSearch = searchLower.isBlank() || 
                 channel.title.lowercase().contains(searchLower) || 
                 channel.category.lowercase().contains(searchLower) ||
+                aliasName.contains(searchLower) ||
                 channel.variants.any { it.language.lowercase().contains(searchLower) }
             
             matchesGenre && matchesLanguage && matchesSearch
         }
     }
 
-    // Native System Alert Dialog for Playback Feedback (Safely overlays IME and Navigation)
     if (pendingFeedbackChannel != null) {
         val channelToFeed = pendingFeedbackChannel!!
         LaunchedEffect(channelToFeed) {
@@ -144,36 +145,66 @@ fun LiveTvTabScreen(
 
         when (activeSubTab) {
             LiveTab.CHANNELS -> {
-                LazyRow(
+                
+                // M3 Browser Top Bar / Search
+                OutlinedTextField(
+                    value = localSearchQuery,
+                    onValueChange = { localSearchQuery = it },
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    placeholder = { Text("Search channels, categories, aliases...", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    shape = CircleShape,
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                        unfocusedBorderColor = Color.Transparent
+                    )
+                )
+
+                // Glassmorphism Genres
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(availableGenres) { genre ->
                         FilterChip(
                             selected = selectedGenre == genre,
                             onClick = { selectedGenre = genre },
-                            label = { Text(genre, fontSize = 12.sp) }
+                            label = { Text(genre, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.4f),
+                                selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+                            ),
+                            shape = CircleShape,
+                            border = FilterChipDefaults.filterChipBorder(borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
                         )
                     }
                 }
 
-                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 8.dp)) {
-                    ExposedDropdownMenuBox(expanded = languageExpanded, onExpandedChange = { languageExpanded = it }, modifier = Modifier.fillMaxWidth()) {
-                        OutlinedTextField(
-                            value = selectedLanguage, onValueChange = {}, readOnly = true,
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = languageExpanded) },
-                            modifier = Modifier.menuAnchor().fillMaxWidth(), textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp)
+                // Glassmorphism Languages
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(availableLanguages) { lang ->
+                        FilterChip(
+                            selected = selectedLanguage == lang,
+                            onClick = { selectedLanguage = lang },
+                            label = { Text(lang, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.4f),
+                                selectedContainerColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.6f)
+                            ),
+                            shape = CircleShape,
+                            border = FilterChipDefaults.filterChipBorder(borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
                         )
-                        ExposedDropdownMenu(expanded = languageExpanded, onDismissRequest = { languageExpanded = false }) {
-                            availableLanguages.forEach { lang ->
-                                DropdownMenuItem(text = { Text(lang, fontSize = 12.sp) }, onClick = { selectedLanguage = lang; languageExpanded = false })
-                            }
-                        }
                     }
                 }
 
                 Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Developer Mode", fontSize = 10.sp, color = Color.Gray, modifier = Modifier.weight(1f))
+                    Text("Developer Mode", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
                     Switch(checked = showDiagnostics, onCheckedChange = { showDiagnostics = it }, modifier = Modifier.scale(0.7f))
                 }
 
@@ -226,20 +257,21 @@ fun LiveTvTabScreen(
                         }
 
                         Box(modifier = Modifier.weight(1f)) {
+                            var menuOpen by remember { mutableStateOf(false) }
                             Button(
                                 modifier = Modifier.fillMaxWidth(),
                                 enabled = !diagnosticRunning && allChannels.isNotEmpty(),
-                                onClick = { exportExpanded = true }
+                                onClick = { menuOpen = true }
                             ) {
                                 Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(4.dp))
                                 Text("Export M3U", fontSize = 11.sp)
                             }
-                            DropdownMenu(expanded = exportExpanded, onDismissRequest = { exportExpanded = false }) {
+                            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                                 DropdownMenuItem(
                                     text = { Text("Export Working Streams") },
                                     onClick = { 
-                                        exportExpanded = false
+                                        menuOpen = false
                                         Toast.makeText(context, "Exporting streams...", Toast.LENGTH_LONG).show()
                                         scope.launch { JioTvRepo.exportWorkingStreamsAsM3u(context, allChannels) }
                                     }
@@ -247,14 +279,14 @@ fun LiveTvTabScreen(
                                 DropdownMenuItem(
                                     text = { Text("Export Only Premium") },
                                     onClick = { 
-                                        exportExpanded = false
+                                        menuOpen = false
                                         scope.launch { JioTvRepo.exportWorkingStreamsAsM3u(context, allChannels.filter { globalPaidChannels[it.defaultChannelId] == true }) }
                                     }
                                 )
                                 DropdownMenuItem(
                                     text = { Text("Export Only Free") },
                                     onClick = { 
-                                        exportExpanded = false
+                                        menuOpen = false
                                         scope.launch { JioTvRepo.exportWorkingStreamsAsM3u(context, allChannels.filter { globalPaidChannels[it.defaultChannelId] != true }) }
                                     }
                                 )
@@ -319,7 +351,7 @@ fun LiveTvTabScreen(
                                             val resolved = JioTvRepo.getResolvedLiveUrl(context, id, channel.title)
                                             smartCache = JioTvRepo.getChannelCacheMap(context) 
                                             pendingFeedbackChannel = channel
-                                            onPlayRequested(resolved.url, channel.title)
+                                            onPlayRequested(resolved.url, channel.title, resolved.headers)
                                         } catch (e: Exception) {
                                             val parts = e.message?.split("|")
                                             val reason = parts?.getOrNull(0) ?: "Playback Failed"
@@ -342,14 +374,14 @@ fun LiveTvTabScreen(
                         Column(
                             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
                                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f))
-                                .border(BorderStroke(0.5.dp, Color.White.copy(alpha = 0.1f)), RoundedCornerShape(24.dp))
+                                .border(BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.1f)), RoundedCornerShape(24.dp))
                                 .padding(24.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             if (userAuthed) {
-                                Icon(Icons.Default.Lock, contentDescription = null, tint = Color.Green, modifier = Modifier.size(48.dp))
+                                Icon(Icons.Default.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(48.dp))
                                 Spacer(modifier = Modifier.height(12.dp))
-                                Text("Authenticated Session Secure", fontWeight = FontWeight.Black, fontSize = 16.sp)
+                                Text("Authenticated Session Secure", fontWeight = FontWeight.Black, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
                                 Button(
                                     onClick = { JioTvRepo.logout(context); userAuthed = false },
                                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
@@ -398,11 +430,11 @@ fun LiveTvTabScreen(
                         Column(
                             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
                                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f))
-                                .border(BorderStroke(0.5.dp, Color.White.copy(alpha = 0.1f)), RoundedCornerShape(24.dp))
+                                .border(BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.1f)), RoundedCornerShape(24.dp))
                                 .padding(24.dp)
                         ) {
                             Text("M3U Sync Manager", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                            Text("Manually link a JioTV channel to an exact M3U alias.", fontSize = 12.sp, color = Color.Gray)
+                            Text("Manually link a JioTV channel to an exact M3U alias.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Spacer(Modifier.height(16.dp))
 
                             var jioSearch by remember { mutableStateOf("") }
@@ -488,18 +520,18 @@ fun LiveTvTabScreen(
                             }
 
                             Spacer(Modifier.height(16.dp))
-                            Divider(color = Color.White.copy(alpha = 0.1f))
+                            Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.1f))
                             Spacer(Modifier.height(8.dp))
 
-                            Text("Existing Mappings:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Text("Existing Mappings:", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
                             val manuals = smartCache.values.filter { it.isManualMapping }
                             if (manuals.isEmpty()) {
-                                Text("No manual mappings found.", fontSize = 12.sp, color = Color.Gray)
+                                Text("No manual mappings found.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             } else {
                                 manuals.forEach { mapping ->
                                     Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                                         Column(modifier = Modifier.weight(1f)) {
-                                            Text("Jio: ${mapping.normalizedName}", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            Text("Jio: ${mapping.normalizedName}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                                             Text("M3U: ${mapping.mappedM3uName}", fontSize = 10.sp, color = MaterialTheme.colorScheme.primary)
                                         }
                                         TextButton(onClick = { 
@@ -538,26 +570,26 @@ fun LiveChannelRowItem(
         Row(modifier = Modifier.padding(12.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             AsyncImage(
                 model = channel.logoUrl, contentDescription = channel.title,
-                modifier = Modifier.size(52.dp).clip(RoundedCornerShape(10.dp)).background(Color.White).padding(4.dp),
+                modifier = Modifier.size(52.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surface).padding(4.dp),
                 contentScale = ContentScale.Fit
             )
             Spacer(modifier = Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(channel.title, fontSize = 16.sp, fontWeight = FontWeight.Black)
+                Text(channel.title, fontSize = 16.sp, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("${channel.category} • ${channel.variants.find { it.channelId == currentActiveId }?.language ?: channel.defaultLanguage}", 
                          fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
                     if (isPaid) {
                         Spacer(modifier = Modifier.width(6.dp))
-                        Surface(color = Color(0xFFD4AF37).copy(alpha = 0.2f), shape = RoundedCornerShape(4.dp)) {
-                            Text(" 🟡 Paid ", fontSize = 9.sp, color = Color(0xFFFFD700), fontWeight = FontWeight.Bold, modifier = Modifier.padding(2.dp))
+                        Surface(color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f), shape = RoundedCornerShape(4.dp)) {
+                            Text(" 🟡 Paid ", fontSize = 9.sp, color = MaterialTheme.colorScheme.tertiary, fontWeight = FontWeight.Bold, modifier = Modifier.padding(2.dp))
                         }
                     }
                     if (isM3uFallback) {
                         Spacer(modifier = Modifier.width(6.dp))
-                        Surface(color = Color(0xFF4CAF50).copy(alpha = 0.2f), shape = RoundedCornerShape(4.dp)) {
+                        Surface(color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f), shape = RoundedCornerShape(4.dp)) {
                             val label = if (isManualMapping) "✓ Synced" else "🔄 Synced ($confidenceScore%)"
-                            Text(" $label ", fontSize = 9.sp, color = Color(0xFF81C784), fontWeight = FontWeight.Bold, modifier = Modifier.padding(2.dp))
+                            Text(" $label ", fontSize = 9.sp, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold, modifier = Modifier.padding(2.dp))
                         }
                     }
                 }
