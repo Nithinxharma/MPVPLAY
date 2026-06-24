@@ -10,10 +10,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -30,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -46,7 +49,8 @@ val globalPaidChannels = mutableStateMapOf<String, Boolean>()
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LiveTvTabScreen(
-    onPlayRequested: (streamUrl: String, channelTitle: String, headers: Map<String, String>) -> Unit
+    searchQuery: String, 
+    onPlayRequested: (streamUrl: String, channelTitle: String) -> Unit 
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -89,11 +93,13 @@ fun LiveTvTabScreen(
     val availableGenres = remember(allChannels) { listOf("All") + allChannels.map { it.category }.distinct().sorted() }
     val availableLanguages = remember(allChannels) { listOf("All Languages") + allChannels.flatMap { it.variants.map { v -> v.language } }.distinct().sorted() }
 
-    val filteredChannels = remember(allChannels, selectedGenre, selectedLanguage, localSearchQuery) {
+    val filteredChannels = remember(allChannels, selectedGenre, selectedLanguage, localSearchQuery, searchQuery) {
         allChannels.filter { channel ->
             val matchesGenre = selectedGenre == "All" || channel.category == selectedGenre
             val matchesLanguage = selectedLanguage == "All Languages" || channel.variants.any { it.language.equals(selectedLanguage, true) }
-            val searchLower = localSearchQuery.trim().lowercase()
+            
+            val activeSearch = if (localSearchQuery.isNotBlank()) localSearchQuery else searchQuery
+            val searchLower = activeSearch.trim().lowercase()
             
             val cacheEntry = smartCache[channel.defaultChannelId]
             val aliasName = cacheEntry?.mappedM3uName?.lowercase() ?: ""
@@ -146,7 +152,6 @@ fun LiveTvTabScreen(
         when (activeSubTab) {
             LiveTab.CHANNELS -> {
                 
-                // M3 Browser Top Bar / Search
                 OutlinedTextField(
                     value = localSearchQuery,
                     onValueChange = { localSearchQuery = it },
@@ -163,12 +168,11 @@ fun LiveTvTabScreen(
                     )
                 )
 
-                // Glassmorphism Genres
                 LazyRow(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(availableGenres) { genre ->
+                    items(items = availableGenres) { genre ->
                         FilterChip(
                             selected = selectedGenre == genre,
                             onClick = { selectedGenre = genre },
@@ -183,12 +187,11 @@ fun LiveTvTabScreen(
                     }
                 }
 
-                // Glassmorphism Languages
                 LazyRow(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(availableLanguages) { lang ->
+                    items(items = availableLanguages) { lang ->
                         FilterChip(
                             selected = selectedLanguage == lang,
                             onClick = { selectedLanguage = lang },
@@ -334,7 +337,7 @@ fun LiveTvTabScreen(
                         columns = GridCells.Fixed(1), modifier = Modifier.fillMaxWidth().weight(1f),
                         contentPadding = PaddingValues(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        items(filteredChannels) { channel ->
+                        items(items = filteredChannels) { channel ->
                             val channelLangId = channel.getIdForLanguage(if (selectedLanguage != "All Languages") selectedLanguage else channel.defaultLanguage)
                             val entry = smartCache[channelLangId]
                             val isM3uFallback = entry?.preferredSource == PlaybackSource.M3U
@@ -351,7 +354,11 @@ fun LiveTvTabScreen(
                                             val resolved = JioTvRepo.getResolvedLiveUrl(context, id, channel.title)
                                             smartCache = JioTvRepo.getChannelCacheMap(context) 
                                             pendingFeedbackChannel = channel
-                                            onPlayRequested(resolved.url, channel.title, resolved.headers)
+                                            
+                                            // Make headers available globally for the PlayerActivity
+                                            JioTvRepo.lastResolvedHeaders = resolved.headers
+                                            
+                                            onPlayRequested(resolved.url, channel.title)
                                         } catch (e: Exception) {
                                             val parts = e.message?.split("|")
                                             val reason = parts?.getOrNull(0) ?: "Playback Failed"
