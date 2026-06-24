@@ -51,5 +51,9 @@ data class ChannelCacheEntry(
     var lastTestedTime: Long = 0,
     var failureCount: Int = 0,
     var successCount: Int = 0,
-    var userFeedback: Boolean? = null
+    var userFeedback: Boolean? = null,
+    var mappedM3uName: String? = null,
+    var confidenceScore: Int = 0,
+    var isManualMapping: Boolean = false,
+    var userVerified: Boolean = false
 )
