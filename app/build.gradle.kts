@@ -56,19 +56,17 @@ android {
 
   buildTypes {
     named("release") {
-      if (project.hasProperty("releaseKeyStore")) {
-        signingConfig = signingConfigs.getByName("release")
-      }
-      isMinifyEnabled = true
-      isShrinkResources = true
-      proguardFiles(
+    signingConfig = signingConfigs.getByName("release")
+    isMinifyEnabled = true
+    isShrinkResources = true
+    proguardFiles(
         getDefaultProguardFile("proguard-android-optimize.txt"),
         "proguard-rules.pro"
-      )
-      ndk {
+    )
+    ndk {
         debugSymbolLevel = "none"
-      }
     }
+}
 
     create("preview") {
       initWith(getByName("release"))
