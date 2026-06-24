@@ -36,7 +36,9 @@ data class DiagnosticResult(
     val resolvedUrl: String = ""
 )
 
-enum class PlaybackSource { JIO_TV, M3U }
+enum class PlaybackSource { JIO_TV, M3U, MANUAL_URL }
+
+enum class MappingStatus { WORKING, BROKEN, UNTESTED }
 
 data class ResolvedStream(
     val url: String,
@@ -45,18 +47,33 @@ data class ResolvedStream(
     val mappedName: String = ""
 )
 
+data class M3uMatchCandidate(
+    val url: String,
+    val mappedName: String,
+    val confidence: Int,
+    val headers: Map<String, String>,
+    val resolution: String
+)
+
+class MultipleStreamsException(val candidates: List<M3uMatchCandidate>) : Exception("Multiple candidates found")
+
 data class ChannelCacheEntry(
     val channelId: String,
     val normalizedName: String,
     var preferredSource: PlaybackSource,
+    var status: MappingStatus = MappingStatus.UNTESTED,
     var lastSuccessfulUrl: String? = null,
+    var manualStreamUrl: String? = null,
     var lastTestedTime: Long = 0,
     var failureCount: Int = 0,
     var successCount: Int = 0,
-    var userFeedback: Boolean? = null,
     var mappedM3uName: String? = null,
-    var confidenceScore: Int = 0,
     var isManualMapping: Boolean = false,
-    var userVerified: Boolean = false,
     var failedM3uUrls: List<String> = emptyList() 
+)
+
+data class PlaylistMeta(
+    val name: String,
+    val channelCount: Int,
+    val lastUpdated: Long
 )
