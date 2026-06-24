@@ -181,7 +181,7 @@ fun LiveTvTabScreen(
                     )
                 )
 
-                LazyRow(
+                                LazyRow(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
@@ -194,11 +194,12 @@ fun LiveTvTabScreen(
                                 containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.4f),
                                 selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
                             ),
-                            shape = CircleShape,
-                            border = FilterChipDefaults.filterChipBorder(enabled = true, selected = selectedGenre == genre)
+                            shape = CircleShape
                         )
                     }
                 }
+
+       
 
                 Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                     ExposedDropdownMenuBox(
