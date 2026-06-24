@@ -162,7 +162,7 @@ object JioTvRepo {
         return if (file.exists()) file.readText() else context.assets.open("in.m3u").bufferedReader().readText()
     }
     
-    fun saveM3uText(context: Context, content: String) {
+        fun saveM3uText(context: Context, content: String) {
         getM3uFile(context).writeText(content)
         val prefs = context.getSharedPreferences("JioTvSmartCache", Context.MODE_PRIVATE)
         prefs.edit()
@@ -171,6 +171,11 @@ object JioTvRepo {
             .apply()
         cachedM3uEntries = null // Reload
     }
+
+    fun reloadM3uParser() {
+        cachedM3uEntries = null
+    }
+
 
     suspend fun syncPlaylistFromUrl(context: Context, url: String): Boolean = withContext(Dispatchers.IO) {
         try {
