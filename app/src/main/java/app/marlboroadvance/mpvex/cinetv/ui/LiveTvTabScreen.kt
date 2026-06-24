@@ -65,6 +65,8 @@ fun LiveTvTabScreen(
     var localSearchQuery by remember { mutableStateOf("") }
     var selectedGenre by remember { mutableStateOf("All") }
     var selectedLanguage by remember { mutableStateOf("All Languages") }
+// Add this line with your other 'var' declarations
+var languageExpanded by remember { mutableStateOf(false) }
 
     var smartCache by remember { mutableStateOf(mapOf<String, ChannelCacheEntry>()) }
     var pendingFeedbackChannel by remember { mutableStateOf<LiveChannelItem?>(null) }
