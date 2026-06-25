@@ -1280,6 +1280,37 @@ fun RenderPlayerButton(
         }
     }
 
+
+// --- ADD THESE LINES BELOW ---
+        PlayerButton.MEDIA_INFO -> {
+            Surface(
+                shape = CircleShape,
+                color = surfaceColor,
+                contentColor = contentColor,
+                border = borderColor,
+                modifier = Modifier
+                    .size(buttonSize)
+                    .clip(CircleShape)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = ripple(bounded = true),
+                        onClick = { clickEvent() }
+                    )
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Outlined.Info,
+                        contentDescription = "Media Info",
+                        tint = contentColor,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
+        }
+        // --- END ADDITION ---
+
+
+
     PlayerButton.NONE -> { /* Do nothing */
     }
   }
