@@ -102,6 +102,6 @@ fun getPlayerButtonLabel(button: PlayerButton): String =
     PlayerButton.CUSTOM_SKIP -> "Custom Skip"
     PlayerButton.BACKGROUND_PLAYBACK -> "Background Playback"
     PlayerButton.AMBIENT_MODE -> "Ambience Mode"
-    PlayerButton.MEDIA_INFO -> "Media Info" // <-- ADDED LABEL
+    PlayerButton.CHANNEL_INFO -> "Channel / Media Info"
     PlayerButton.NONE -> "None"
   }
