@@ -1282,7 +1282,7 @@ fun RenderPlayerButton(
 
 PlayerButton.CHANNEL_INFO -> {
     ControlsButton(
-        icon = Icons.Outlined.LiveTv,
+        icon = Icons.Outlined.Info,
         onClick = {
             android.widget.Toast.makeText(
                 activity,
