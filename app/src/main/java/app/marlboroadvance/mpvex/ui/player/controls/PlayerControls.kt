@@ -131,6 +131,9 @@ import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
 import org.koin.compose.koinInject
+import app.marlboroadvance.mpvex.ui.player.controls.components.MediaInfoCard
+import app.marlboroadvance.mpvex.ui.player.controls.components.MediaInfoPosition
+import app.marlboroadvance.mpvex.ui.player.controls.components.MediaType
 import kotlin.math.abs
 
 @Suppress("CompositionLocalAllowlist")
