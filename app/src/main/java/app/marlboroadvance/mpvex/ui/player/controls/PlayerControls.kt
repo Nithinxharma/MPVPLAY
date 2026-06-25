@@ -1623,6 +1623,21 @@ fun PlayerControls(
     )
 
     val panel by viewModel.panelShown.collectAsState()
+  var showMediaInfo by remember { mutableStateOf(false) }
+
+MediaInfoCard(
+    mediaType = MediaType.UNKNOWN,
+    artworkUrl = null,
+    title = "Demo Media",
+    subtitle = "Testing Overlay",
+    description = "This is only for integration testing.",
+    metadata = emptyMap(),
+    visible = showMediaInfo,
+    position = MediaInfoPosition.RIGHT,
+    onDismiss = {
+        showMediaInfo = false
+    }
+)
     PlayerPanels(
       panelShown = panel,
       onDismissRequest = { onOpenPanel(Panels.None) },
