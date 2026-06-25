@@ -1280,17 +1280,18 @@ fun RenderPlayerButton(
         }
     }
 
-
 PlayerButton.CHANNEL_INFO -> {
-
     ControlsButton(
         icon = Icons.Outlined.LiveTv,
         onClick = {
-            onOpenSheet(Sheets.MediaInfo)
+            android.widget.Toast.makeText(
+                activity,
+                "Channel Info Clicked",
+                android.widget.Toast.LENGTH_SHORT
+            ).show()
         },
-        modifier = Modifier.size(buttonSize)
+        modifier = Modifier.size(buttonSize),
     )
-
 }
 
     PlayerButton.NONE -> { /* Do nothing */
