@@ -41,6 +41,19 @@ fun PlayerPanels(
       Panels.None -> {
         Box(Modifier.fillMaxHeight())
       }
+Panels.MediaInfo -> {
+    MediaInfoCard(
+        mediaType = viewModel.mediaType,
+        artworkUrl = viewModel.artworkUrl,
+        title = viewModel.mediaTitle,
+        subtitle = viewModel.mediaSubtitle,
+        description = viewModel.mediaDescription,
+        metadata = viewModel.mediaMetadata,
+        visible = true,
+        position = MediaInfoPosition.RIGHT,
+        onDismiss = onDismissRequest
+    )
+}
       Panels.SubtitleSettings -> {
         SubtitleSettingsPanel(onDismissRequest)
       }
