@@ -1280,6 +1280,19 @@ fun RenderPlayerButton(
         }
     }
 
+
+PlayerButton.CHANNEL_INFO -> {
+
+    ControlsButton(
+        icon = Icons.Outlined.LiveTv,
+        onClick = {
+            onOpenSheet(Sheets.MediaInfo)
+        },
+        modifier = Modifier.size(buttonSize)
+    )
+
+}
+
     PlayerButton.NONE -> { /* Do nothing */
     }
   }
