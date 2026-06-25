@@ -183,6 +183,27 @@ class PlayerViewModel(
   private val _preciseDuration = MutableStateFlow(0f)
   val preciseDuration = _preciseDuration.asStateFlow()
 
+// ---------------- Media Info Overlay ----------------
+
+private val _showMediaInfo = MutableStateFlow(false)
+val showMediaInfo = _showMediaInfo.asStateFlow()
+
+private val _mediaArtwork = MutableStateFlow<String?>(null)
+val mediaArtwork = _mediaArtwork.asStateFlow()
+
+private val _mediaTitle = MutableStateFlow("")
+val mediaTitle = _mediaTitle.asStateFlow()
+
+private val _mediaSubtitle = MutableStateFlow<String?>(null)
+val mediaSubtitle = _mediaSubtitle.asStateFlow()
+
+private val _mediaDescription = MutableStateFlow<String?>(null)
+val mediaDescription = _mediaDescription.asStateFlow()
+
+private val _mediaMetadata = MutableStateFlow<Map<String, String>>(emptyMap())
+val mediaMetadata = _mediaMetadata.asStateFlow()
+
+  
   // Audio state
   val currentVolume = MutableStateFlow(host.audioManager.getStreamVolume(AudioManager.STREAM_MUSIC))
   private val volumeBoostCap by MPVLib.propInt["volume-max"].collectAsState(viewModelScope)
