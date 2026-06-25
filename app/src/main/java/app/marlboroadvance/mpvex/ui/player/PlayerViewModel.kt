@@ -1936,6 +1936,31 @@ val mediaMetadata = _mediaMetadata.asStateFlow()
 }
 
 // Extension functions
+fun showMediaInfo() {
+    _showMediaInfo.value = true
+}
+
+fun hideMediaInfo() {
+    _showMediaInfo.value = false
+}
+
+fun toggleMediaInfo() {
+    _showMediaInfo.value = !_showMediaInfo.value
+}
+
+fun updateMediaInfo(
+    artwork: String?,
+    title: String,
+    subtitle: String? = null,
+    description: String? = null,
+    metadata: Map<String, String> = emptyMap()
+) {
+    _mediaArtwork.value = artwork
+    _mediaTitle.value = title
+    _mediaSubtitle.value = subtitle
+    _mediaDescription.value = description
+    _mediaMetadata.value = metadata
+}
 fun Float.normalize(
   inMin: Float,
   inMax: Float,
