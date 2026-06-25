@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -238,7 +239,6 @@ fun LiveTvTabScreen(
             Column(
                 modifier = Modifier.fillMaxWidth()
             ) {
-                // Overlaying Settings inside a Box avoids missing 'actions' parameter error in BrowserTopBar
                 Box(modifier = Modifier.fillMaxWidth()) {
                     BrowserTopBar(
                         title = "CineTV",
@@ -246,22 +246,20 @@ fun LiveTvTabScreen(
                         selectedCount = 0,
                         totalCount = allChannels.size,
                         onCancelSelection = {},
-                        isHomeScreen = true,
-                        onSearchClick = {
-                            isSearchVisible = !isSearchVisible
-                        }
+                        isHomeScreen = true
                     )
-                    IconButton(
-                        onClick = {
-                            activeSubTab = LiveTab.JIO_LOGIN
-                        },
-                        modifier = Modifier.align(Alignment.CenterEnd).padding(end = 8.dp)
+                    
+                    // Independent actions overlaid horizontally on the right side
+                    Row(
+                        modifier = Modifier.align(Alignment.CenterEnd).padding(end = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            Icons.Default.Settings,
-                            contentDescription = "Settings",
-                            tint = Color.White
-                        )
+                        IconButton(onClick = { isSearchVisible = !isSearchVisible }) {
+                            Icon(Icons.Default.Search, contentDescription = "Search", tint = Color.White)
+                        }
+                        IconButton(onClick = { activeSubTab = LiveTab.JIO_LOGIN }) {
+                            Icon(Icons.Default.Settings, contentDescription = "Settings", tint = Color.White)
+                        }
                     }
                 }
 
@@ -277,33 +275,6 @@ fun LiveTvTabScreen(
                         shape = RoundedCornerShape(24.dp),
                         singleLine = true
                     )
-                }
-
-                Surface(
-                    color = MaterialTheme.colorScheme.surface,
-                    tonalElevation = 1.dp
-                ) {
-                    TabRow(
-                        selectedTabIndex = activeSubTab.ordinal,
-                        containerColor = Color.Transparent,
-                        divider = {}
-                    ) {
-                        LiveTab.values().forEachIndexed { index, tab ->
-                            Tab(
-                                selected = activeSubTab.ordinal == index,
-                                onClick = {
-                                    activeSubTab = tab
-                                },
-                                text = {
-                                    Text(
-                                        tab.label,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            )
-                        }
-                    }
                 }
             }
         }
@@ -380,10 +351,15 @@ fun LiveTvTabScreen(
                 }
 
                 LiveTab.JIO_LOGIN -> {
+                    BackHandler {
+                        // Allows the user to naturally navigate back to Channels using their phone's back button
+                        activeSubTab = LiveTab.CHANNELS 
+                    }
+                    
                     LazyColumn(
                         modifier = Modifier.fillMaxSize().padding(16.dp), 
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        contentPadding = PaddingValues(bottom = 100.dp) // Added to fix scrolling cuts
+                        contentPadding = PaddingValues(bottom = 100.dp) 
                     ) {
                         item {
                             Column(
@@ -561,7 +537,13 @@ fun LiveTvTabScreen(
                                         Text("Status: $testResult", color = if (testResult == "Working") Color.Green else Color.Red, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                     }
                                     Spacer(Modifier.height(8.dp))
+                                    
+                                    // Independent PLAY and LINK functionality
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Button(onClick = {
+                                            onPlayRequested(entry.url, entry.name)
+                                        }, modifier = Modifier.weight(1f)) { Text("PLAY") }
+                                        
                                         Button(onClick = { 
                                             linkSearchQuery = JioTvRepo.generateSmartFilterKeyword(entry.name)
                                             m3uToLink = entry 
