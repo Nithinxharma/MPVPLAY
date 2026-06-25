@@ -22,7 +22,7 @@ import androidx.compose.material.icons.outlined.FastForward
 import androidx.compose.material.icons.outlined.Shuffle
 import androidx.compose.material.icons.outlined.Headset
 import androidx.compose.material.icons.outlined.BlurOn
-import androidx.compose.material.icons.outlined.Info // Added for MEDIA_INFO
+import androidx.compose.material.icons.outlined.LiveTv
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.vector.ImageVector
 
