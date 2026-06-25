@@ -1285,11 +1285,8 @@ PlayerButton.CHANNEL_INFO -> {
     ControlsButton(
         icon = Icons.Outlined.Info,
         onClick = {
-            android.widget.Toast.makeText(
-                activity,
-                "Channel Info Clicked",
-                android.widget.Toast.LENGTH_SHORT
-            ).show()
+            viewModel.toggleMediaInfo()
+            onOpenPanel(Panels.MediaInfo)
         },
         modifier = Modifier.size(buttonSize),
     )
