@@ -2,7 +2,7 @@ package app.marlboroadvance.mpvex.cinetv.model
 
 enum class LiveTab(val label: String) {
     CHANNELS("Live Channels"),
-    JIO_LOGIN("Stream Manager")
+    SETTINGS("Settings & Auth")
 }
 
 data class ChannelVariant(
@@ -47,29 +47,17 @@ data class ResolvedStream(
     val mappedName: String = ""
 )
 
-data class M3uMatchCandidate(
-    val url: String,
-    val mappedName: String,
-    val confidence: Int,
-    val headers: Map<String, String>,
-    val resolution: String
-)
-
-class MultipleStreamsException(val candidates: List<M3uMatchCandidate>) : Exception("Multiple candidates found")
-
 data class ChannelCacheEntry(
     val channelId: String,
-    val normalizedName: String,
-    var preferredSource: PlaybackSource,
+    val mappedM3uName: String? = null,
+    val mappedUrl: String? = null,
+    val isManualMapping: Boolean = false,
+    var preferredSource: PlaybackSource = PlaybackSource.JIO_TV,
     var status: MappingStatus = MappingStatus.UNTESTED,
-    var lastSuccessfulUrl: String? = null,
-    var manualStreamUrl: String? = null,
-    var lastTestedTime: Long = 0,
-    var failureCount: Int = 0,
+    var lastSuccessTime: Long = 0,
+    var lastFailureTime: Long = 0,
     var successCount: Int = 0,
-    var mappedM3uName: String? = null,
-    var isManualMapping: Boolean = false,
-    var failedM3uUrls: List<String> = emptyList() 
+    var failureCount: Int = 0
 )
 
 data class PlaylistMeta(
