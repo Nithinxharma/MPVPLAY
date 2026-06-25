@@ -22,7 +22,7 @@ import androidx.compose.material.icons.outlined.FastForward
 import androidx.compose.material.icons.outlined.Shuffle
 import androidx.compose.material.icons.outlined.Headset
 import androidx.compose.material.icons.outlined.BlurOn
-import androidx.compose.material.icons.outlined.LiveTv
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.vector.ImageVector
 
@@ -57,7 +57,7 @@ enum class PlayerButton(
   BACKGROUND_PLAYBACK(Icons.Outlined.Headset),
   AMBIENT_MODE(Icons.Outlined.BlurOn),
 
-  CHANNEL_INFO(Icons.Outlined.LiveTv),
+  CHANNEL_INFO(Icons.Outlined.Info),
 
   NONE(Icons.Outlined.Bookmarks),
 }
