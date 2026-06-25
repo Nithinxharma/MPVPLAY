@@ -7,6 +7,7 @@ import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -104,7 +105,8 @@ fun LiveTvTabScreen(
 
             val cacheEntry = smartCache[channel.defaultChannelId]
             val aliasName = cacheEntry?.mappedM3uName?.lowercase() ?: ""
-            val manualName = cacheEntry?.mappedUrl?.lowercase() ?: ""
+            // Use lastSuccessfulUrl for manualName matching safely without requiring model changes
+            val manualName = cacheEntry?.lastSuccessfulUrl?.lowercase() ?: ""
 
             val matchesSearch = searchLower.isBlank() || 
                 channel.title.lowercase().contains(searchLower) || 
@@ -124,7 +126,7 @@ fun LiveTvTabScreen(
                 JioTvRepo.lastResolvedHeaders = resolved.headers
                 
                 val cacheEntry = smartCache[idToPlay]
-                if (cacheEntry?.userVerified != true && !cacheEntry?.isManualMapping!!) {
+                if (cacheEntry?.userVerified != true && cacheEntry?.isManualMapping != true) {
                     pendingFeedbackData = channel to resolved.url
                 } else {
                     pendingFeedbackData = null
@@ -201,7 +203,7 @@ fun LiveTvTabScreen(
                         items(filteredJioForLink) { jioCh ->
                             Row(
                                 modifier = Modifier.fillMaxWidth().clickable {
-                                    JioTvRepo.saveManualMapping(context, jioCh.defaultChannelId, m3uToLink!!.name, m3uToLink!!.name, m3uToLink!!.url)
+                                    JioTvRepo.saveManualMapping(context, jioCh.defaultChannelId, m3uToLink!!.name, m3uToLink!!.url)
                                     smartCache = JioTvRepo.getChannelCacheMap(context)
                                     Toast.makeText(context, "Mapping saved permanently!", Toast.LENGTH_SHORT).show()
                                     m3uToLink = null
@@ -236,29 +238,32 @@ fun LiveTvTabScreen(
             Column(
                 modifier = Modifier.fillMaxWidth()
             ) {
-                BrowserTopBar(
-                    title = "CineTV",
-                    isInSelectionMode = false,
-                    selectedCount = 0,
-                    totalCount = allChannels.size,
-                    onCancelSelection = {},
-                    isHomeScreen = true,
-                    onSearchClick = {
-                        isSearchVisible = !isSearchVisible
-                    },
-                    actions = {
-                        IconButton(
-                            onClick = {
-                                activeSubTab = LiveTab.JIO_LOGIN
-                            }
-                        ) {
-                            Icon(
-                                Icons.Default.Settings,
-                                contentDescription = "Settings"
-                            )
+                // Overlaying Settings inside a Box avoids missing 'actions' parameter error in BrowserTopBar
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    BrowserTopBar(
+                        title = "CineTV",
+                        isInSelectionMode = false,
+                        selectedCount = 0,
+                        totalCount = allChannels.size,
+                        onCancelSelection = {},
+                        isHomeScreen = true,
+                        onSearchClick = {
+                            isSearchVisible = !isSearchVisible
                         }
+                    )
+                    IconButton(
+                        onClick = {
+                            activeSubTab = LiveTab.JIO_LOGIN
+                        },
+                        modifier = Modifier.align(Alignment.CenterEnd).padding(end = 8.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Settings,
+                            contentDescription = "Settings",
+                            tint = Color.White
+                        )
                     }
-                )
+                }
 
                 AnimatedVisibility(
                     visible = isSearchVisible
