@@ -1627,16 +1627,19 @@ fun PlayerControls(
     )
 
     val panel by viewModel.panelShown.collectAsState()
-  val showMediaInfo by viewModel.showMediaInfo.collectAsState()
-val mediaInfo by viewModel.currentMediaInfo.collectAsState()
-
+val showMediaInfo by viewModel.showMediaInfo.collectAsState()
+val artwork by viewModel.mediaArtwork.collectAsState()
+val title by viewModel.mediaTitle.collectAsState()
+val subtitle by viewModel.mediaSubtitle.collectAsState()
+val description by viewModel.mediaDescription.collectAsState()
+val metadata by viewModel.mediaMetadata.collectAsState()
 MediaInfoCard(
-    mediaType = mediaInfo.type,
-    artworkUrl = mediaInfo.artworkUrl,
-    title = mediaInfo.title,
-    subtitle = mediaInfo.subtitle,
-    description = mediaInfo.description,
-    metadata = mediaInfo.metadata,
+mediaType = MediaType.UNKNOWN,
+artworkUrl = artwork,
+title = title,
+subtitle = subtitle,
+description = description,
+metadata = metadata,
     visible = showMediaInfo,
     position = MediaInfoPosition.RIGHT,
     onDismiss = {
