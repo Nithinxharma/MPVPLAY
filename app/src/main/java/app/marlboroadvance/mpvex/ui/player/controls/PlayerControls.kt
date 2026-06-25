@@ -1634,7 +1634,7 @@ MediaInfoCard(
     title = "Demo Media",
     subtitle = "Testing Overlay",
     description = "This is only for integration testing.",
-    metadata = emptyMap(),
+    metadata = emptyMap<String, String>(),
     visible = showMediaInfo,
     position = MediaInfoPosition.RIGHT,
     onDismiss = {
