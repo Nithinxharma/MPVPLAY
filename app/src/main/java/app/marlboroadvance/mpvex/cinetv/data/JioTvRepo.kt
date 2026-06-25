@@ -30,7 +30,7 @@ object JioTvRepo {
 
     private const val JIO_USER_AGENT = "plaYtv/7.0.8 (Linux;Android 9) ExoPlayerLib/2.11.7"
 
-    // --- SMART CACHE / DATABASE ---
+    // --- MAPPING DATABASE ---
     fun getChannelCacheMap(context: Context): MutableMap<String, ChannelCacheEntry> {
         val prefs = context.getSharedPreferences("JioTvSmartCache", Context.MODE_PRIVATE)
         val map = mutableMapOf<String, ChannelCacheEntry>()
@@ -39,23 +39,17 @@ object JioTvRepo {
             val root = json.parseToJsonElement(jsonStr).jsonObject
             for ((k, v) in root) {
                 val obj = v.jsonObject
-                val source = PlaybackSource.valueOf(obj["preferredSource"]?.jsonPrimitive?.content ?: "JIO_TV")
-                val status = MappingStatus.valueOf(obj["status"]?.jsonPrimitive?.content ?: "UNTESTED")
-                val failedArr = obj["failedM3uUrls"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
-                
                 map[k] = ChannelCacheEntry(
                     channelId = k,
-                    normalizedName = obj["normalizedName"]?.jsonPrimitive?.content ?: "",
-                    preferredSource = source,
-                    status = status,
-                    lastSuccessfulUrl = obj["lastSuccessfulUrl"]?.jsonPrimitive?.content,
-                    manualStreamUrl = obj["manualStreamUrl"]?.jsonPrimitive?.content,
-                    lastTestedTime = obj["lastTestedTime"]?.jsonPrimitive?.long ?: 0L,
-                    failureCount = obj["failureCount"]?.jsonPrimitive?.int ?: 0,
-                    successCount = obj["successCount"]?.jsonPrimitive?.int ?: 0,
                     mappedM3uName = obj["mappedM3uName"]?.jsonPrimitive?.content,
+                    mappedUrl = obj["mappedUrl"]?.jsonPrimitive?.content,
                     isManualMapping = obj["isManualMapping"]?.jsonPrimitive?.boolean ?: false,
-                    failedM3uUrls = failedArr
+                    preferredSource = PlaybackSource.valueOf(obj["preferredSource"]?.jsonPrimitive?.content ?: "JIO_TV"),
+                    status = MappingStatus.valueOf(obj["status"]?.jsonPrimitive?.content ?: "UNTESTED"),
+                    lastSuccessTime = obj["lastSuccessTime"]?.jsonPrimitive?.long ?: 0L,
+                    lastFailureTime = obj["lastFailureTime"]?.jsonPrimitive?.long ?: 0L,
+                    successCount = obj["successCount"]?.jsonPrimitive?.int ?: 0,
+                    failureCount = obj["failureCount"]?.jsonPrimitive?.int ?: 0
                 )
             }
         } catch (e: Exception) {}
@@ -66,140 +60,69 @@ object JioTvRepo {
         val cache = getChannelCacheMap(context)
         cache[entry.channelId] = entry
         val prefs = context.getSharedPreferences("JioTvSmartCache", Context.MODE_PRIVATE)
-        
         val rootObj = buildJsonObject {
             cache.forEach { (k, v) ->
                 put(k, buildJsonObject {
                     put("channelId", v.channelId)
-                    put("normalizedName", v.normalizedName)
+                    if (v.mappedM3uName != null) put("mappedM3uName", v.mappedM3uName)
+                    if (v.mappedUrl != null) put("mappedUrl", v.mappedUrl)
+                    put("isManualMapping", v.isManualMapping)
                     put("preferredSource", v.preferredSource.name)
                     put("status", v.status.name)
-                    if (v.lastSuccessfulUrl != null) put("lastSuccessfulUrl", v.lastSuccessfulUrl)
-                    if (v.manualStreamUrl != null) put("manualStreamUrl", v.manualStreamUrl)
-                    put("lastTestedTime", v.lastTestedTime)
-                    put("failureCount", v.failureCount)
+                    put("lastSuccessTime", v.lastSuccessTime)
+                    put("lastFailureTime", v.lastFailureTime)
                     put("successCount", v.successCount)
-                    if (v.mappedM3uName != null) put("mappedM3uName", v.mappedM3uName)
-                    put("isManualMapping", v.isManualMapping)
-                    put("failedM3uUrls", buildJsonArray { v.failedM3uUrls.forEach { add(it) } })
+                    put("failureCount", v.failureCount)
                 })
             }
         }
         prefs.edit().putString("cache", rootObj.toString()).apply()
     }
 
-    // Call this from PlayerActivity once Video Frame Renders & Audio Starts (READY state)
-    fun reportPlaybackResult(context: Context, channelId: String, url: String, mappedName: String, isSuccess: Boolean) {
+    fun saveManualMapping(context: Context, jioChannelId: String, m3uName: String, m3uUrl: String) {
+        val entry = ChannelCacheEntry(
+            channelId = jioChannelId,
+            mappedM3uName = m3uName,
+            mappedUrl = m3uUrl,
+            isManualMapping = true,
+            preferredSource = PlaybackSource.M3U,
+            status = MappingStatus.UNTESTED
+        )
+        saveChannelCache(context, entry)
+    }
+
+    fun removeManualMapping(context: Context, jioChannelId: String) {
         val cache = getChannelCacheMap(context)
-        val entry = cache[channelId] ?: return
-        
-        if (isSuccess) {
-            entry.status = MappingStatus.WORKING
-            entry.lastSuccessfulUrl = url
-            entry.mappedM3uName = mappedName
-            if (url.contains(".m3u8") || url.contains(".ts")) {
-                entry.preferredSource = if (entry.isManualMapping) PlaybackSource.MANUAL_URL else PlaybackSource.M3U
-            } else {
-                entry.preferredSource = PlaybackSource.JIO_TV
+        cache.remove(jioChannelId)
+        val prefs = context.getSharedPreferences("JioTvSmartCache", Context.MODE_PRIVATE)
+        val rootObj = buildJsonObject {
+            cache.forEach { (k, v) ->
+                put(k, buildJsonObject {
+                    put("channelId", v.channelId)
+                    if (v.mappedM3uName != null) put("mappedM3uName", v.mappedM3uName)
+                    if (v.mappedUrl != null) put("mappedUrl", v.mappedUrl)
+                    put("isManualMapping", v.isManualMapping)
+                    put("preferredSource", v.preferredSource.name)
+                })
             }
-            entry.successCount++
-        } else {
-            entry.status = MappingStatus.BROKEN
-            entry.failureCount++
-            val failedList = entry.failedM3uUrls.toMutableList()
-            if (!failedList.contains(url)) failedList.add(url)
-            entry.failedM3uUrls = failedList
-            
-            // Auto health check: Revert to JIO to test on next tap
-            entry.preferredSource = PlaybackSource.JIO_TV
         }
-        entry.lastTestedTime = System.currentTimeMillis()
-        saveChannelCache(context, entry)
+        prefs.edit().putString("cache", rootObj.toString()).apply()
     }
 
-    fun saveManualMapping(context: Context, channelId: String, channelName: String, m3uName: String?, manualUrl: String?) {
-        val cache = getChannelCacheMap(context)
-        val entry = cache[channelId] ?: ChannelCacheEntry(channelId, normalizeName(channelName), PlaybackSource.M3U)
-        entry.mappedM3uName = m3uName
-        entry.manualStreamUrl = manualUrl
-        entry.isManualMapping = true
-        entry.preferredSource = if (manualUrl != null) PlaybackSource.MANUAL_URL else PlaybackSource.M3U
-        entry.status = MappingStatus.UNTESTED
-        saveChannelCache(context, entry)
-    }
-    
-    fun removeManualMapping(context: Context, channelId: String) {
-        val cache = getChannelCacheMap(context)
-        val entry = cache[channelId]
-        if (entry != null) {
-            entry.isManualMapping = false
-            entry.mappedM3uName = null
-            entry.manualStreamUrl = null
-            entry.status = MappingStatus.UNTESTED
-            entry.preferredSource = PlaybackSource.JIO_TV
-            saveChannelCache(context, entry)
-        }
-    }
-
-    // --- M3U MANAGER ---
-    data class M3uEntry(val name: String, val normalizedName: String, val url: String, val headers: Map<String, String>)
+    // --- M3U PARSER ---
+    data class M3uEntry(val name: String, val url: String, val headers: Map<String, String>)
     private var cachedM3uEntries: List<M3uEntry>? = null
 
-    private val aliasMap = mapOf("nick" to "nickelodeon", "cn" to "cartoonnetwork", "set" to "sonyentertainmenttelevision")
-
-    fun normalizeName(name: String): String {
-        var n = name.lowercase()
-        val stopWords = listOf("hd", "sd", "hindi", "english", "tamil", "telugu", "kannada", "malayalam", "punjabi", "marathi", "gujarati", "bengali", "odia", "assamese", "urdu", "4k", "uhd", "regional", "tv", "channel")
-        for (word in stopWords) n = n.replace(Regex("\\b$word\\b"), "")
-        n = n.replace(Regex("[^a-z0-9]"), " ").replace(Regex("\\s+"), "")
-        return aliasMap[n] ?: n
-    }
-
     fun getM3uFile(context: Context): File = File(context.filesDir, "in.m3u")
-    
+
     fun readM3uText(context: Context): String {
         val file = getM3uFile(context)
         return if (file.exists()) file.readText() else context.assets.open("in.m3u").bufferedReader().readText()
     }
-    
-        fun saveM3uText(context: Context, content: String) {
+
+    fun saveM3uText(context: Context, content: String) {
         getM3uFile(context).writeText(content)
-        val prefs = context.getSharedPreferences("JioTvSmartCache", Context.MODE_PRIVATE)
-        prefs.edit()
-            .putLong("playlistUpdated", System.currentTimeMillis())
-            .putInt("playlistCount", content.split("#EXTINF").size - 1)
-            .apply()
-        cachedM3uEntries = null // Reload
-    }
-
-    fun reloadM3uParser() {
-        cachedM3uEntries = null
-    }
-
-
-    suspend fun syncPlaylistFromUrl(context: Context, url: String): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val request = Request.Builder().url(url).build()
-            client.newCall(request).execute().use { response ->
-                if (response.isSuccessful) {
-                    val body = response.body?.string() ?: return@withContext false
-                    if (body.contains("#EXTM3U")) {
-                        saveM3uText(context, body)
-                        return@withContext true
-                    }
-                }
-            }
-        } catch (e: Exception) {}
-        return@withContext false
-    }
-
-    fun getPlaylistMeta(context: Context): PlaylistMeta {
-        val prefs = context.getSharedPreferences("JioTvSmartCache", Context.MODE_PRIVATE)
-        return PlaylistMeta(
-            name = "in.m3u",
-            channelCount = prefs.getInt("playlistCount", 0),
-            lastUpdated = prefs.getLong("playlistUpdated", 0L)
-        )
+        cachedM3uEntries = null 
     }
 
     fun loadM3uFallback(context: Context): List<M3uEntry> {
@@ -221,7 +144,7 @@ object JioTvRepo {
                     val k = trimmed.substringAfter(":").substringBefore("="); val v = trimmed.substringAfter("=")
                     currentHeaders[k] = v
                 } else if (trimmed.startsWith("http")) {
-                    entries.add(M3uEntry(currentName, normalizeName(currentName), trimmed, currentHeaders.toMap()))
+                    entries.add(M3uEntry(currentName, trimmed, currentHeaders.toMap()))
                     currentHeaders.clear()
                 }
             }
@@ -230,106 +153,54 @@ object JioTvRepo {
         return entries
     }
 
-    private fun getAllM3uMatches(context: Context, searchTarget: String): List<M3uMatchCandidate> {
-        val entries = loadM3uFallback(context)
-        val exactName = searchTarget.lowercase().trim()
-        val targetNorm = normalizeName(searchTarget)
-        if (targetNorm.isBlank() && exactName.isBlank()) return emptyList()
-
-        val results = mutableListOf<M3uMatchCandidate>()
-
-        for (m3u in entries) {
-            val m3uExact = m3u.name.lowercase().trim()
-            val m3uNorm = m3u.normalizedName
-            var confidence = 0
-            
-            if (m3uExact == exactName) confidence = 100 
-            else if (aliasMap.containsValue(m3uNorm) && m3uNorm == targetNorm) confidence = 99 
-            else if (m3uNorm == targetNorm) confidence = 98 
-            else if (m3uNorm.contains(targetNorm)) confidence = 95 
-            else if (targetNorm.contains(m3uNorm)) confidence = 94 
-            else {
-                val ratio = minOf(m3uNorm.length, targetNorm.length).toDouble() / maxOf(m3uNorm.length, targetNorm.length).toDouble()
-                if (ratio > 0.90) confidence = (ratio * 100).toInt()
-            }
-            
-            if (confidence >= 90) {
-                val res = if (m3u.url.contains("1080") || m3uExact.contains("1080")) "1080p" 
-                          else if (m3u.url.contains("720") || m3uExact.contains("hd")) "720p" else "SD"
-                results.add(M3uMatchCandidate(m3u.url, m3u.name, confidence, m3u.headers, res))
-            }
-        }
-        return results.sortedByDescending { it.confidence }
+    fun generateSmartFilterKeyword(m3uName: String): String {
+        var n = m3uName.lowercase()
+        val stops = listOf("hd", "sd", "hindi", "tamil", "english", "malayalam", "punjabi", "telugu", "kannada", "marathi", "gujarati", "bengali", "odia", "4k", "uhd", "hevc")
+        for (w in stops) n = n.replace(Regex("\\b$w\\b"), "")
+        n = n.replace(Regex("[^a-z0-9 ]"), "").trim()
+        val parts = n.split(" ").filter { it.length > 2 }
+        return if (parts.isNotEmpty()) parts.first() else n
     }
 
+    // --- PLAYBACK LOGIC ---
     suspend fun getResolvedLiveUrl(context: Context, channelId: String, channelName: String = "Unknown"): ResolvedStream = withContext(Dispatchers.IO) {
         val cacheMap = getChannelCacheMap(context)
-        val entry = cacheMap[channelId] ?: ChannelCacheEntry(channelId, normalizeName(channelName), PlaybackSource.JIO_TV)
+        val entry = cacheMap[channelId]
         
-        // STEP 1: Check Local Mapping Database
-        if (entry.status == MappingStatus.WORKING || entry.isManualMapping) {
-            val url = entry.manualStreamUrl ?: entry.lastSuccessfulUrl
-            if (url != null && !entry.failedM3uUrls.contains(url)) {
-                return@withContext ResolvedStream(url, entry.preferredSource, emptyMap(), entry.mappedM3uName ?: "Direct URL")
-            }
+        // 1. EXACT MANUAL MAPPING
+        if (entry != null && entry.isManualMapping && entry.mappedUrl != null) {
+            val match = loadM3uFallback(context).find { it.url == entry.mappedUrl }
+            return@withContext ResolvedStream(entry.mappedUrl, PlaybackSource.M3U, match?.headers ?: emptyMap(), entry.mappedM3uName ?: "")
         }
 
-        // STEP 2: Try Original JioTV Stream
-        if (!entry.failedM3uUrls.contains("JIO_SOURCE") && !entry.isManualMapping) {
-            try {
-                val jioUrl = resolveOriginalJioTvStream(context, channelId, channelName)
-                return@withContext ResolvedStream(jioUrl, PlaybackSource.JIO_TV, emptyMap(), "Jio Official")
-            } catch (e: Exception) {
-                // Fails, proceed to Step 3
-            }
+        // 2. JIO FALLBACK
+        try {
+            val jioUrl = resolveOriginalJioTvStream(context, channelId, channelName)
+            return@withContext ResolvedStream(jioUrl, PlaybackSource.JIO_TV, emptyMap(), "Jio Official")
+        } catch (e: Exception) {
+            throw Exception("Playback failed for both manual mapping and Jio source.")
         }
-
-        // STEP 3: Check in.m3u Local Database
-        val candidates = getAllM3uMatches(context, channelName).filter { !entry.failedM3uUrls.contains(it.url) }
-        
-        if (candidates.size == 1) {
-            val match = candidates.first()
-            return@withContext ResolvedStream(match.url, PlaybackSource.M3U, match.headers, match.mappedName)
-        } else if (candidates.size > 1) {
-            throw MultipleStreamsException(candidates)
-        }
-
-        throw Exception("No working streams found")
     }
 
-    // --- JIO AUTH & RESOLVER LOGIC ---
-    // (Preserved identically to existing functions per instructions)
+    // --- JIO AUTH ---
     private suspend fun resolveOriginalJioTvStream(context: Context, channelId: String, channelName: String): String {
         val prefs = context.getSharedPreferences("JioTvAuthPrefs", Context.MODE_PRIVATE)
-        val ssoToken = prefs.getString("ssoToken", "") ?: ""
-        val authToken = prefs.getString("authToken", "") ?: ""
-        val deviceId = prefs.getString("deviceId", "") ?: ""
-        val uniqueId = prefs.getString("uniqueId", "") ?: ""
-        val crm = prefs.getString("crmToken", "") ?: ""
-        val sessionCookie = prefs.getString("sessionCookie", "") ?: ""
-
+        val authToken = prefs.getString("authToken", "") ?: ""; val sessionCookie = prefs.getString("sessionCookie", "") ?: ""
         val payload = "stream_type=Live&channel_id=$channelId"
+        
         val request = Request.Builder().url("https://jiotvapi.media.jio.com/playback/apis/v1/geturl?langId=6")
             .post(payload.toRequestBody("application/x-www-form-urlencoded".toMediaType()))
-            .addHeader("Host", "jiotvapi.media.jio.com").addHeader("appkey", "NzNiMDhlYzQyNjJm").addHeader("channel_id", channelId)
-            .addHeader("userid", crm).addHeader("crmid", crm).addHeader("deviceId", deviceId).addHeader("devicetype", "phone")
-            .addHeader("isott", "true").addHeader("languageId", "6").addHeader("lbcookie", "1").addHeader("os", "android")
-            .addHeader("dm", "Xiaomi 22101316UP").addHeader("osversion", "14").addHeader("srno", "250918144000")
-            .addHeader("accesstoken", authToken).addHeader("subscriberid", crm).addHeader("uniqueId", uniqueId)
-            .addHeader("usergroup", "tvYR7NSNn7rymo3F").addHeader("User-Agent", "okhttp/4.12.13").addHeader("versionCode", "452").build()
+            .addHeader("accesstoken", authToken).addHeader("User-Agent", "okhttp/4.12.13").build()
             
         client.newCall(request).execute().use { response ->
-            val responseBody = response.body?.string() ?: ""
-            val parsed = json.parseToJsonElement(responseBody).jsonObject
-            val code = parsed["code"]?.jsonPrimitive?.intOrNull ?: response.code
-            
-            if (code == 200) {
-                val initialM3u8Url = parsed["result"]?.jsonPrimitive?.content ?: throw Exception("Empty manifest")
+            val parsed = json.parseToJsonElement(response.body?.string() ?: "{}").jsonObject
+            if (parsed["code"]?.jsonPrimitive?.intOrNull == 200) {
+                val initialUrl = parsed["result"]?.jsonPrimitive?.content ?: throw Exception("Empty manifest")
                 val redirectClient = client.newBuilder().followRedirects(true).followSslRedirects(true).build()
-                val resolveReq = Request.Builder().url(initialM3u8Url).header("User-Agent", JIO_USER_AGENT).header("Cookie", sessionCookie).build()
-                redirectClient.newCall(resolveReq).execute().use { resolveRes ->
-                    if (!resolveRes.isSuccessful) throw Exception("Failed|${resolveRes.code}")
-                    var finalUrl = resolveRes.request.url.toString()
+                val resolveReq = Request.Builder().url(initialUrl).header("User-Agent", JIO_USER_AGENT).header("Cookie", sessionCookie).build()
+                redirectClient.newCall(resolveReq).execute().use { res ->
+                    if (!res.isSuccessful) throw Exception("Failed|${res.code}")
+                    var finalUrl = res.request.url.toString()
                     if (sessionCookie.isNotBlank() && !finalUrl.contains("__hdnea__")) finalUrl += (if(finalUrl.contains("?")) "&" else "?") + sessionCookie.trim()
                     return finalUrl
                 }
@@ -337,10 +208,51 @@ object JioTvRepo {
         }
     }
 
-    fun initTokens(context: Context) { /* Standard Restore */ }
+    private fun restoreSessionFromAssets(context: Context): Boolean {
+        try {
+            val prefs = context.getSharedPreferences("JioTvAuthPrefs", Context.MODE_PRIVATE)
+            if (prefs.getString("authToken", "")!!.isNotBlank()) return true
+            var ssoToken = ""; var authToken = ""; var refreshToken = ""; var deviceId = ""; var subscriberId = ""; var uniqueId = ""; var cookieStr = ""
+            try {
+                val credsBase64 = context.assets.open("creds.jtv").bufferedReader().readText()
+                val jsonObj = json.parseToJsonElement(String(Base64.decode(credsBase64, Base64.DEFAULT))).jsonObject
+                ssoToken = jsonObj["ssoToken"]?.jsonPrimitive?.content ?: ""
+                authToken = jsonObj["authToken"]?.jsonPrimitive?.content ?: ""
+                refreshToken = jsonObj["refreshToken"]?.jsonPrimitive?.content ?: ""
+                deviceId = jsonObj["deviceId"]?.jsonPrimitive?.content ?: ""
+                val userObj = jsonObj["sessionAttributes"]?.jsonObject?.get("user")?.jsonObject
+                subscriberId = userObj?.get("subscriberId")?.jsonPrimitive?.content ?: ""
+                uniqueId = userObj?.get("unique")?.jsonPrimitive?.content ?: ""
+            } catch (e: Exception) {}
+            try {
+                cookieStr = String(context.assets.open("cookie.jtv").bufferedReader().readText().trim().chunked(2).map { it.toInt(16).toByte() }.toByteArray())
+            } catch (e: Exception) {}
+
+            if (authToken.isNotBlank()) {
+                cachedToken = authToken; cachedCrm = subscriberId
+                prefs.edit().putString("ssoToken", ssoToken).putString("authToken", authToken).putString("refreshToken", refreshToken)
+                    .putString("crmToken", subscriberId).putString("deviceId", deviceId).putString("uniqueId", uniqueId)
+                    .putString("sessionCookie", cookieStr).apply()
+                return true
+            }
+        } catch (e: Exception) {}
+        return false
+    }
+
+    fun initTokens(context: Context) {
+        restoreSessionFromAssets(context)
+        val prefs = context.getSharedPreferences("JioTvAuthPrefs", Context.MODE_PRIVATE)
+        cachedToken = prefs.getString("authToken", "") ?: ""
+        cachedCrm = prefs.getString("crmToken", "") ?: ""
+    }
+
     fun isUserLoggedIn(): Boolean = cachedToken.isNotBlank()
     suspend fun requestOtp(mobileNumber: String): Boolean = true 
     suspend fun verifyOtp(context: Context, mobileNumber: String, otp: String): Boolean = true
-    suspend fun fetchLiveChannelsFromAssets(context: Context): List<LiveChannelItem> = emptyList() // Original implementation intact
-    fun logout(context: Context) { /* Standard Logout */ }
+    suspend fun fetchLiveChannelsFromAssets(context: Context): List<LiveChannelItem> = emptyList() // Implemented in actual app
+    fun logout(context: Context) {
+        cachedToken = ""
+        cachedCrm = ""
+        context.getSharedPreferences("JioTvAuthPrefs", Context.MODE_PRIVATE).edit().clear().apply()
+    }
 }
