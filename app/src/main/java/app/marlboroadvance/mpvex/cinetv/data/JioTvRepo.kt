@@ -22,6 +22,11 @@ object JioTvRepo {
         .followSslRedirects(true)
         .build()
 
+    private val quickClient = client.newBuilder()
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(5, TimeUnit.SECONDS)
+        .build()
+
     private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
     
     @Volatile private var cachedToken: String = ""
@@ -85,7 +90,7 @@ object JioTvRepo {
             mappedM3uName = m3uName,
             mappedUrl = m3uUrl,
             isManualMapping = true,
-            preferredSource = PlaybackSource.M3U,
+            preferredSource = PlaybackSource.MANUAL_URL,
             status = MappingStatus.UNTESTED
         )
         saveChannelCache(context, entry)
@@ -103,6 +108,7 @@ object JioTvRepo {
                     if (v.mappedUrl != null) put("mappedUrl", v.mappedUrl)
                     put("isManualMapping", v.isManualMapping)
                     put("preferredSource", v.preferredSource.name)
+                    put("status", v.status.name)
                 })
             }
         }
@@ -122,7 +128,41 @@ object JioTvRepo {
 
     fun saveM3uText(context: Context, content: String) {
         getM3uFile(context).writeText(content)
+        val prefs = context.getSharedPreferences("JioTvSmartCache", Context.MODE_PRIVATE)
+        prefs.edit()
+            .putLong("playlistUpdated", System.currentTimeMillis())
+            .putInt("playlistCount", content.split("#EXTINF").size - 1)
+            .apply()
         cachedM3uEntries = null 
+    }
+
+    fun reloadM3uParser() {
+        cachedM3uEntries = null
+    }
+
+    suspend fun syncPlaylistFromUrl(context: Context, url: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val request = Request.Builder().url(url).build()
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: return@withContext false
+                    if (body.contains("#EXTM3U")) {
+                        saveM3uText(context, body)
+                        return@withContext true
+                    }
+                }
+            }
+        } catch (e: Exception) {}
+        return@withContext false
+    }
+
+    fun getPlaylistMeta(context: Context): PlaylistMeta {
+        val prefs = context.getSharedPreferences("JioTvSmartCache", Context.MODE_PRIVATE)
+        return PlaylistMeta(
+            name = "in.m3u",
+            channelCount = prefs.getInt("playlistCount", 0),
+            lastUpdated = prefs.getLong("playlistUpdated", 0L)
+        )
     }
 
     fun loadM3uFallback(context: Context): List<M3uEntry> {
@@ -162,24 +202,40 @@ object JioTvRepo {
         return if (parts.isNotEmpty()) parts.first() else n
     }
 
+    suspend fun testStreamUrl(url: String, headers: Map<String, String>): String = withContext(Dispatchers.IO) {
+        try {
+            val reqBuilder = Request.Builder().url(url).head()
+            headers.forEach { (k, v) -> reqBuilder.header(k, v) }
+            if (!headers.containsKey("User-Agent")) reqBuilder.header("User-Agent", JIO_USER_AGENT)
+
+            quickClient.newCall(reqBuilder.build()).execute().use { res ->
+                return@withContext when (res.code) {
+                    in 200..299 -> "Working"
+                    403 -> "403 Forbidden"
+                    404 -> "404 Not Found"
+                    else -> "Playlist Error (${res.code})"
+                }
+            }
+        } catch (e: Exception) {
+            if (e.message?.contains("timeout", true) == true) return@withContext "Timeout"
+            return@withContext "Connection Error"
+        }
+    }
+
     // --- PLAYBACK LOGIC ---
     suspend fun getResolvedLiveUrl(context: Context, channelId: String, channelName: String = "Unknown"): ResolvedStream = withContext(Dispatchers.IO) {
         val cacheMap = getChannelCacheMap(context)
         val entry = cacheMap[channelId]
         
-        // 1. EXACT MANUAL MAPPING
+        // Priority: EXACT MANUAL MAPPING FIRST
         if (entry != null && entry.isManualMapping && entry.mappedUrl != null) {
             val match = loadM3uFallback(context).find { it.url == entry.mappedUrl }
-            return@withContext ResolvedStream(entry.mappedUrl, PlaybackSource.M3U, match?.headers ?: emptyMap(), entry.mappedM3uName ?: "")
+            return@withContext ResolvedStream(entry.mappedUrl, PlaybackSource.MANUAL_URL, match?.headers ?: emptyMap(), entry.mappedM3uName ?: "Direct M3U")
         }
 
-        // 2. JIO FALLBACK
-        try {
-            val jioUrl = resolveOriginalJioTvStream(context, channelId, channelName)
-            return@withContext ResolvedStream(jioUrl, PlaybackSource.JIO_TV, emptyMap(), "Jio Official")
-        } catch (e: Exception) {
-            throw Exception("Playback failed for both manual mapping and Jio source.")
-        }
+        // Fallback: ORIGINAL JIO SOURCE
+        val jioUrl = resolveOriginalJioTvStream(context, channelId, channelName)
+        return@withContext ResolvedStream(jioUrl, PlaybackSource.JIO_TV, emptyMap(), "Jio Official")
     }
 
     // --- JIO AUTH ---
