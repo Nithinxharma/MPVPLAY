@@ -110,11 +110,12 @@ enum class Sheets {
 }
 
 enum class Panels {
-  None,
-  SubtitleSettings,
-  SubtitleDelay,
-  AudioDelay,
-  VideoFilters,
+    None,
+    MediaInfo,
+    SubtitleSettings,
+    SubtitleDelay,
+    AudioDelay,
+    VideoFilters
 }
 
 sealed class PlayerUpdates {
