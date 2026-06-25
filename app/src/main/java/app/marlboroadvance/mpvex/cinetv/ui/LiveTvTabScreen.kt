@@ -33,11 +33,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import app.marlboroadvance.mpvex.ui.browser.components.BrowserTopBar
 import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
 import app.marlboroadvance.mpvex.cinetv.data.JioTvRepo
 import app.marlboroadvance.mpvex.cinetv.model.*
+import app.marlboroadvance.mpvex.ui.browser.components.BrowserTopBar
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -68,7 +68,9 @@ fun LiveTvTabScreen(
     var smartCache by remember { mutableStateOf(mapOf<String, ChannelCacheEntry>()) }
     var m3uEntries by remember { mutableStateOf(emptyList<JioTvRepo.M3uEntry>()) }
 
-    // Bottom Sheet State
+    var pendingFeedbackData by remember { mutableStateOf<Pair<LiveChannelItem, String>?>(null) }
+    
+    // Bottom Sheet State for linking
     var m3uToLink by remember { mutableStateOf<JioTvRepo.M3uEntry?>(null) }
     var linkSearchQuery by remember { mutableStateOf("") }
 
@@ -97,16 +99,18 @@ fun LiveTvTabScreen(
             val matchesGenre = selectedGenre == "All" || channel.category == selectedGenre
             val matchesLanguage = selectedLanguage == "All Languages" || channel.variants.any { it.language.equals(selectedLanguage, true) }
 
-            val activeSearch = if (isSearchVisible) localSearchQuery else searchQuery
+            val activeSearch = if (isSearchVisible && localSearchQuery.isNotBlank()) localSearchQuery else searchQuery
             val searchLower = activeSearch.trim().lowercase()
 
             val cacheEntry = smartCache[channel.defaultChannelId]
             val aliasName = cacheEntry?.mappedM3uName?.lowercase() ?: ""
+            val manualName = cacheEntry?.mappedUrl?.lowercase() ?: ""
 
             val matchesSearch = searchLower.isBlank() || 
                 channel.title.lowercase().contains(searchLower) || 
                 channel.category.lowercase().contains(searchLower) ||
                 aliasName.contains(searchLower) ||
+                manualName.contains(searchLower) ||
                 channel.variants.any { it.language.lowercase().contains(searchLower) }
 
             matchesGenre && matchesLanguage && matchesSearch
@@ -118,19 +122,56 @@ fun LiveTvTabScreen(
             try {
                 val resolved = JioTvRepo.getResolvedLiveUrl(context, idToPlay, channel.title)
                 JioTvRepo.lastResolvedHeaders = resolved.headers
+                
+                val cacheEntry = smartCache[idToPlay]
+                if (cacheEntry?.userVerified != true && !cacheEntry?.isManualMapping!!) {
+                    pendingFeedbackData = channel to resolved.url
+                } else {
+                    pendingFeedbackData = null
+                }
+                
                 onPlayRequested(resolved.url, channel.title)
             } catch (e: Exception) {
-                Toast.makeText(context, "Playback Failed", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "No working streams found for ${channel.title}", Toast.LENGTH_SHORT).show()
+                pendingFeedbackData = null
             }
         }
     }
 
+    if (pendingFeedbackData != null) {
+        val (channelToFeed, playedUrl) = pendingFeedbackData!!
+        AlertDialog(
+            onDismissRequest = { /* Must force interaction */ },
+            title = { Text("Playback Feedback") },
+            text = { Text("Did ${channelToFeed.title} play correctly?\n\n(Wait for stream to load. Video must render and audio must start.)") },
+            confirmButton = {
+                Button(onClick = {
+                    JioTvRepo.handleUserPlaybackFeedback(context, channelToFeed.defaultChannelId, true, playedUrl, channelToFeed.title)
+                    smartCache = JioTvRepo.getChannelCacheMap(context)
+                    pendingFeedbackData = null
+                }) { Text("Yes") }
+            },
+            dismissButton = {
+                Button(onClick = {
+                    JioTvRepo.handleUserPlaybackFeedback(context, channelToFeed.defaultChannelId, false, playedUrl, channelToFeed.title)
+                    smartCache = JioTvRepo.getChannelCacheMap(context)
+                    pendingFeedbackData = null
+                    
+                    Toast.makeText(context, "Searching alternative stream...", Toast.LENGTH_SHORT).show()
+                    playChannel(channelToFeed, channelToFeed.defaultChannelId) 
+                }) { Text("No") }
+            }
+        )
+    }
+
+    // Smart Filter Bottom Sheet for Linking M3U to Jio Channel
     if (m3uToLink != null) {
-        ModalBottomSheet(onDismissRequest = { m3uToLink = null }) {
+        ModalBottomSheet(onDismissRequest = { m3uToLink = null; linkSearchQuery = "" }) {
             Column(Modifier.padding(16.dp).fillMaxSize()) {
                 Text("Associate With Jio Channel", fontWeight = FontWeight.Bold, fontSize = 20.sp)
                 Text(m3uToLink!!.name, color = MaterialTheme.colorScheme.primary, fontSize = 14.sp)
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(16.dp))
+                
                 OutlinedTextField(
                     value = linkSearchQuery,
                     onValueChange = { linkSearchQuery = it },
@@ -140,7 +181,6 @@ fun LiveTvTabScreen(
                 )
                 Spacer(Modifier.height(16.dp))
                 
-                // Smart Filter Logic
                 val smartKeyword = remember(m3uToLink) { JioTvRepo.generateSmartFilterKeyword(m3uToLink!!.name) }
                 val currentLinkSearch = linkSearchQuery.ifBlank { smartKeyword }
                 
@@ -161,7 +201,7 @@ fun LiveTvTabScreen(
                         items(filteredJioForLink) { jioCh ->
                             Row(
                                 modifier = Modifier.fillMaxWidth().clickable {
-                                    JioTvRepo.saveManualMapping(context, jioCh.defaultChannelId, m3uToLink!!.name, m3uToLink!!.url)
+                                    JioTvRepo.saveManualMapping(context, jioCh.defaultChannelId, m3uToLink!!.name, m3uToLink!!.name, m3uToLink!!.url)
                                     smartCache = JioTvRepo.getChannelCacheMap(context)
                                     Toast.makeText(context, "Mapping saved permanently!", Toast.LENGTH_SHORT).show()
                                     m3uToLink = null
@@ -189,10 +229,13 @@ fun LiveTvTabScreen(
         }
     }
 
+    // Main Scaffold with exact specified structure
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
-            Column(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.fillMaxWidth()
+            ) {
                 BrowserTopBar(
                     title = "CineTV",
                     isInSelectionMode = false,
@@ -200,43 +243,68 @@ fun LiveTvTabScreen(
                     totalCount = allChannels.size,
                     onCancelSelection = {},
                     isHomeScreen = true,
-                    onSearchClick = { isSearchVisible = !isSearchVisible },
+                    onSearchClick = {
+                        isSearchVisible = !isSearchVisible
+                    },
                     actions = {
-                        IconButton(onClick = { activeSubTab = LiveTab.JIO_LOGIN }) {
-                            Icon(Icons.Default.Settings, contentDescription = "Settings")
+                        IconButton(
+                            onClick = {
+                                activeSubTab = LiveTab.JIO_LOGIN
+                            }
+                        ) {
+                            Icon(
+                                Icons.Default.Settings,
+                                contentDescription = "Settings"
+                            )
                         }
                     }
                 )
 
-                AnimatedVisibility(visible = isSearchVisible) {
+                AnimatedVisibility(
+                    visible = isSearchVisible
+                ) {
                     OutlinedTextField(
                         value = localSearchQuery,
                         onValueChange = { localSearchQuery = it },
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                        placeholder = { Text("Search by name, category, language...") },
+                        placeholder = { Text("Search channels, aliases...") },
                         leadingIcon = { Icon(Icons.Default.Search, null) },
                         shape = RoundedCornerShape(24.dp),
                         singleLine = true
                     )
                 }
 
-                TabRow(
-                    selectedTabIndex = activeSubTab.ordinal,
-                    containerColor = Color.Transparent,
-                    divider = {}
+                Surface(
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 1.dp
                 ) {
-                    LiveTab.values().forEach { tab ->
-                        Tab(
-                            selected = activeSubTab == tab,
-                            onClick = { activeSubTab = tab },
-                            text = { Text(tab.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
-                        )
+                    TabRow(
+                        selectedTabIndex = activeSubTab.ordinal,
+                        containerColor = Color.Transparent,
+                        divider = {}
+                    ) {
+                        LiveTab.values().forEachIndexed { index, tab ->
+                            Tab(
+                                selected = activeSubTab.ordinal == index,
+                                onClick = {
+                                    activeSubTab = tab
+                                },
+                                text = {
+                                    Text(
+                                        tab.label,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            )
+                        }
                     }
                 }
             }
         }
     ) { innerPadding ->
         Column(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+
             when (activeSubTab) {
                 LiveTab.CHANNELS -> {
                     LazyRow(
@@ -296,7 +364,9 @@ fun LiveTvTabScreen(
                                 LiveChannelRowItem(
                                     channel = channel,
                                     currentActiveId = channelLangId,
-                                    entry = entry,
+                                    isM3uFallback = entry?.preferredSource == PlaybackSource.M3U || entry?.isManualMapping == true,
+                                    confidenceScore = entry?.confidenceScore ?: 0,
+                                    isManualMapping = entry?.isManualMapping ?: false,
                                     onPlayRequested = { id -> playChannel(channel, id) }
                                 )
                             }
@@ -305,11 +375,16 @@ fun LiveTvTabScreen(
                 }
 
                 LiveTab.JIO_LOGIN -> {
-                    LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize().padding(16.dp), 
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        contentPadding = PaddingValues(bottom = 100.dp) // Added to fix scrolling cuts
+                    ) {
                         item {
                             Column(
                                 modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
                                     .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f))
+                                    .border(BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.1f)), RoundedCornerShape(24.dp))
                                     .padding(24.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
@@ -359,7 +434,7 @@ fun LiveTvTabScreen(
                             }
                         }
                         
-                        item { Spacer(Modifier.height(24.dp)) }
+                        item { Spacer(Modifier.height(32.dp)) }
                         
                         item {
                             Column(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)).padding(20.dp)) {
@@ -390,7 +465,7 @@ fun LiveTvTabScreen(
                             }
                             Spacer(Modifier.height(16.dp))
                         }
-
+                        
                         item {
                             Column(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)).padding(20.dp)) {
                                 Text("Local File Mode", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
@@ -498,7 +573,7 @@ fun LiveTvTabScreen(
                                             Text(if (isTesting) "..." else "TEST") 
                                         }
                                         
-                                        IconButton(onClick = { /* Delete visually from list (requires rewriting IN.M3U technically, so disabled for safety) */ }) { 
+                                        IconButton(onClick = { /* Delete visually from list (disabled for safety) */ }) { 
                                             Icon(Icons.Default.Delete, null, tint = Color.Gray) 
                                         }
                                     }
@@ -516,18 +591,22 @@ fun LiveTvTabScreen(
 fun LiveChannelRowItem(
     channel: LiveChannelItem, 
     currentActiveId: String,
-    entry: ChannelCacheEntry?,
+    isM3uFallback: Boolean,
+    confidenceScore: Int,
+    isManualMapping: Boolean,
     onPlayRequested: (channelId: String) -> Unit
 ) {
+    val isPaid = globalPaidChannels[currentActiveId] == true
+
     Card(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { onPlayRequested(currentActiveId) },
-        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier.fillMaxWidth().clickable { onPlayRequested(currentActiveId) },
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
     ) {
         Row(modifier = Modifier.padding(12.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             AsyncImage(
                 model = channel.logoUrl, contentDescription = channel.title,
-                modifier = Modifier.size(52.dp).clip(RoundedCornerShape(10.dp)).background(Color.Black.copy(alpha = 0.5f)).padding(4.dp),
+                modifier = Modifier.size(52.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surface).padding(4.dp),
                 contentScale = ContentScale.Fit
             )
             Spacer(modifier = Modifier.width(14.dp))
@@ -536,8 +615,13 @@ fun LiveChannelRowItem(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("${channel.category} • ${channel.variants.find { it.channelId == currentActiveId }?.language ?: channel.defaultLanguage}", 
                          fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
-                    
-                    if (entry?.isManualMapping == true) {
+                    if (isPaid) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Surface(color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f), shape = RoundedCornerShape(4.dp)) {
+                            Text(" 🟡 Paid ", fontSize = 9.sp, color = MaterialTheme.colorScheme.tertiary, fontWeight = FontWeight.Bold, modifier = Modifier.padding(2.dp))
+                        }
+                    }
+                    if (isM3uFallback) {
                         Spacer(modifier = Modifier.width(6.dp))
                         Surface(color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f), shape = RoundedCornerShape(4.dp)) {
                             Text(" ✓ Synced ", fontSize = 9.sp, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold, modifier = Modifier.padding(2.dp))
