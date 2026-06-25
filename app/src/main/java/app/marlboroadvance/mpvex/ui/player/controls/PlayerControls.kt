@@ -1626,19 +1626,20 @@ fun PlayerControls(
     )
 
     val panel by viewModel.panelShown.collectAsState()
-  var showMediaInfo by remember { mutableStateOf(false) }
+  val showMediaInfo by viewModel.showMediaInfo.collectAsState()
+val mediaInfo by viewModel.currentMediaInfo.collectAsState()
 
 MediaInfoCard(
-    mediaType = MediaType.UNKNOWN,
-    artworkUrl = null,
-    title = "Demo Media",
-    subtitle = "Testing Overlay",
-    description = "This is only for integration testing.",
-    metadata = emptyMap<String, String>(),
+    mediaType = mediaInfo.type,
+    artworkUrl = mediaInfo.artworkUrl,
+    title = mediaInfo.title,
+    subtitle = mediaInfo.subtitle,
+    description = mediaInfo.description,
+    metadata = mediaInfo.metadata,
     visible = showMediaInfo,
     position = MediaInfoPosition.RIGHT,
     onDismiss = {
-        showMediaInfo = false
+        viewModel.hideMediaInfo()
     }
 )
     PlayerPanels(
