@@ -1927,27 +1927,6 @@ val mediaMetadata = _mediaMetadata.asStateFlow()
   fun showToast(message: String) {
     Toast.makeText(appContext, message, Toast.LENGTH_SHORT).show()
   }
-
-  override fun onCleared() {
-    super.onCleared()
-    _screenStateManager.cleanup()
-    ambientModeManager.cleanup()
-  }
-}
-
-// Extension functions
-fun showMediaInfo() {
-    _showMediaInfo.value = true
-}
-
-fun hideMediaInfo() {
-    _showMediaInfo.value = false
-}
-
-fun toggleMediaInfo() {
-    _showMediaInfo.value = !_showMediaInfo.value
-}
-
 fun updateMediaInfo(
     artwork: String?,
     title: String,
@@ -1961,6 +1940,26 @@ fun updateMediaInfo(
     _mediaDescription.value = description
     _mediaMetadata.value = metadata
 }
+
+fun showMediaInfo() {
+    _showMediaInfo.value = true
+}
+
+fun hideMediaInfo() {
+    _showMediaInfo.value = false
+}
+
+fun toggleMediaInfo() {
+    _showMediaInfo.value = !_showMediaInfo.value
+}
+  override fun onCleared() {
+    super.onCleared()
+    _screenStateManager.cleanup()
+    ambientModeManager.cleanup()
+  }
+}
+
+// Extension functions
 fun Float.normalize(
   inMin: Float,
   inMax: Float,
