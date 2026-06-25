@@ -41,6 +41,9 @@ fun PlayerPanels(
       Panels.None -> {
         Box(Modifier.fillMaxHeight())
       }
+      Panels.MediaInfo -> {
+    Box(Modifier.fillMaxHeight())
+      }
       Panels.SubtitleSettings -> {
         SubtitleSettingsPanel(onDismissRequest)
       }
