@@ -2,7 +2,7 @@ package app.marlboroadvance.mpvex.cinetv.model
 
 enum class LiveTab(val label: String) {
     CHANNELS("Live Channels"),
-    SETTINGS("Settings & Auth")
+    JIO_LOGIN("Stream Manager")
 }
 
 data class ChannelVariant(
