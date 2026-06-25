@@ -24,11 +24,6 @@ object JioTvRepo {
         .followSslRedirects(true)
         .build()
 
-    private val quickClient = client.newBuilder()
-        .connectTimeout(5, TimeUnit.SECONDS)
-        .readTimeout(5, TimeUnit.SECONDS)
-        .build()
-
     private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
     
     @Volatile private var cachedToken: String = ""
@@ -47,11 +42,8 @@ object JioTvRepo {
             val root = json.parseToJsonElement(jsonStr).jsonObject
             for ((k, v) in root) {
                 val obj = v.jsonObject
-                val source = if (obj["preferredSource"]?.jsonPrimitive?.content == "M3U") PlaybackSource.M3U 
-                             else if (obj["preferredSource"]?.jsonPrimitive?.content == "MANUAL_URL") PlaybackSource.MANUAL_URL 
-                             else PlaybackSource.JIO_TV
+                val source = if (obj["preferredSource"]?.jsonPrimitive?.content == "M3U") PlaybackSource.M3U else PlaybackSource.JIO_TV
                 val failedArr = obj["failedM3uUrls"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
-                val statusStr = obj["status"]?.jsonPrimitive?.content ?: "UNTESTED"
                 
                 map[k] = ChannelCacheEntry(
                     channelId = k,
@@ -66,9 +58,7 @@ object JioTvRepo {
                     confidenceScore = obj["confidenceScore"]?.jsonPrimitive?.int ?: 0,
                     isManualMapping = obj["isManualMapping"]?.jsonPrimitive?.boolean ?: false,
                     userVerified = obj["userVerified"]?.jsonPrimitive?.boolean ?: false,
-                    failedM3uUrls = failedArr,
-                    mappedUrl = obj["mappedUrl"]?.jsonPrimitive?.content,
-                    status = MappingStatus.valueOf(statusStr)
+                    failedM3uUrls = failedArr
                 )
             }
         } catch (e: Exception) {}
@@ -93,11 +83,9 @@ object JioTvRepo {
                     put("successCount", v.successCount)
                     if (v.userFeedback != null) put("userFeedback", v.userFeedback)
                     if (v.mappedM3uName != null) put("mappedM3uName", v.mappedM3uName)
-                    if (v.mappedUrl != null) put("mappedUrl", v.mappedUrl)
                     put("confidenceScore", v.confidenceScore)
                     put("isManualMapping", v.isManualMapping)
                     put("userVerified", v.userVerified)
-                    put("status", v.status.name)
                     put("failedM3uUrls", buildJsonArray { v.failedM3uUrls.forEach { add(it) } })
                 })
             }
@@ -118,7 +106,7 @@ object JioTvRepo {
                 entry.preferredSource = PlaybackSource.M3U
                 entry.lastSuccessfulUrl = playedUrl
                 val match = loadM3uFallback(context).find { it.url == playedUrl }
-                if (match != null) entry.mappedM3uName = match.name
+                entry.mappedM3uName = match?.name
             } else {
                 entry.preferredSource = PlaybackSource.JIO_TV
                 entry.lastSuccessfulUrl = "JIO_SOURCE"
@@ -149,9 +137,7 @@ object JioTvRepo {
             entry.preferredSource = PlaybackSource.JIO_TV
             entry.lastSuccessfulUrl = null
             entry.mappedM3uName = null
-            entry.mappedUrl = null
             entry.isManualMapping = false
-            entry.status = MappingStatus.UNTESTED
             saveChannelCache(context, entry)
         }
     }
@@ -176,55 +162,6 @@ object JioTvRepo {
         return aliasMap[n] ?: n
     }
 
-    fun generateSmartFilterKeyword(m3uName: String): String {
-        var n = m3uName.lowercase()
-        val stops = listOf("hd", "sd", "hindi", "tamil", "english", "malayalam", "punjabi", "telugu", "kannada", "marathi", "gujarati", "bengali", "odia", "4k", "uhd", "hevc")
-        for (w in stops) n = n.replace(Regex("\\b$w\\b"), "")
-        n = n.replace(Regex("[^a-z0-9 ]"), "").trim()
-        val parts = n.split(" ").filter { it.length > 2 }
-        return if (parts.isNotEmpty()) parts.first() else n
-    }
-
-    fun saveManualMapping(context: Context, jioChannelId: String, channelName: String, m3uName: String, m3uUrl: String) {
-        val cache = getChannelCacheMap(context)
-        val entry = cache[jioChannelId] ?: ChannelCacheEntry(jioChannelId, normalizeName(channelName), PlaybackSource.MANUAL_URL)
-        entry.mappedM3uName = m3uName
-        entry.mappedUrl = m3uUrl
-        entry.isManualMapping = true
-        entry.preferredSource = PlaybackSource.MANUAL_URL
-        entry.status = MappingStatus.UNTESTED
-        saveChannelCache(context, entry)
-    }
-
-    suspend fun testStreamUrl(url: String, headers: Map<String, String>): String = withContext(Dispatchers.IO) {
-        try {
-            val reqBuilder = Request.Builder().url(url).head()
-            headers.forEach { (k, v) -> reqBuilder.header(k, v) }
-            if (!headers.containsKey("User-Agent")) reqBuilder.header("User-Agent", JIO_USER_AGENT)
-
-            quickClient.newCall(reqBuilder.build()).execute().use { res ->
-                return@withContext when (res.code) {
-                    in 200..299 -> "Working"
-                    403 -> "403 Forbidden"
-                    404 -> "404 Not Found"
-                    else -> "Playlist Error (${res.code})"
-                }
-            }
-        } catch (e: Exception) {
-            if (e.message?.contains("timeout", true) == true) return@withContext "Timeout"
-            return@withContext "Connection Error"
-        }
-    }
-
-    fun getPlaylistMeta(context: Context): PlaylistMeta {
-        val prefs = context.getSharedPreferences("JioTvSmartCache", Context.MODE_PRIVATE)
-        return PlaylistMeta(
-            name = "in.m3u",
-            channelCount = prefs.getInt("playlistCount", 0),
-            lastUpdated = prefs.getLong("playlistUpdated", 0L)
-        )
-    }
-
     fun getM3uFile(context: Context): File = File(context.filesDir, "in.m3u")
     
     fun readM3uText(context: Context): String {
@@ -234,28 +171,6 @@ object JioTvRepo {
     
     fun saveM3uText(context: Context, content: String) {
         getM3uFile(context).writeText(content)
-        val prefs = context.getSharedPreferences("JioTvSmartCache", Context.MODE_PRIVATE)
-        prefs.edit()
-            .putLong("playlistUpdated", System.currentTimeMillis())
-            .putInt("playlistCount", content.split("#EXTINF").size - 1)
-            .apply()
-        cachedM3uEntries = null
-    }
-
-    suspend fun syncPlaylistFromUrl(context: Context, url: String): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val request = Request.Builder().url(url).build()
-            client.newCall(request).execute().use { response ->
-                if (response.isSuccessful) {
-                    val body = response.body?.string() ?: return@withContext false
-                    if (body.contains("#EXTM3U")) {
-                        saveM3uText(context, body)
-                        return@withContext true
-                    }
-                }
-            }
-        } catch (e: Exception) {}
-        return@withContext false
     }
     
     fun reloadM3uParser() {
@@ -341,13 +256,7 @@ object JioTvRepo {
         val cacheMap = getChannelCacheMap(context)
         val entry = cacheMap[channelId] ?: ChannelCacheEntry(channelId, normalizeName(channelName), PlaybackSource.JIO_TV)
         
-        // Priority 1: EXACT MANUAL MAPPING FIRST
-        if (entry.isManualMapping && entry.mappedUrl != null) {
-            val match = loadM3uFallback(context).find { it.url == entry.mappedUrl }
-            return@withContext ResolvedStream(entry.mappedUrl!!, PlaybackSource.MANUAL_URL, match?.headers ?: emptyMap(), entry.mappedM3uName ?: "Direct M3U")
-        }
-
-        // Priority 2: User Verified (Legacy system)
+        // Priority 1: User Verified
         if (entry.userVerified && entry.lastSuccessfulUrl != null) {
             val url = entry.lastSuccessfulUrl!!
             if (entry.preferredSource == PlaybackSource.M3U) {
@@ -359,6 +268,16 @@ object JioTvRepo {
                     return@withContext ResolvedStream(jioUrl, PlaybackSource.JIO_TV, emptyMap(), "Jio Official")
                 } catch (e: Exception) {
                     // Fallthrough to hunt 
+                }
+            }
+        }
+
+        // Priority 2: Manual Mapping
+        if (entry.isManualMapping && !entry.mappedM3uName.isNullOrBlank()) {
+            val matches = getAllM3uMatches(context, entry.mappedM3uName!!, true)
+            for (match in matches) {
+                if (!entry.failedM3uUrls.contains(match.url)) {
+                    return@withContext ResolvedStream(match.url, PlaybackSource.M3U, match.headers, match.mappedName)
                 }
             }
         }
@@ -628,5 +547,95 @@ object JioTvRepo {
         6 -> "English"; 7 -> "Malayalam"; 8 -> "Tamil"; 9 -> "Gujarati"; 10 -> "Odia"
         11 -> "Telugu"; 12 -> "Bhojpuri"; 13 -> "Kannada"; 14 -> "Assamese"; 15 -> "Nepali"; 16 -> "French"
         else -> "Other"
+    }
+
+    // --- NEW EXTENSIONS FOR M3U MANAGER ---
+    
+    // Dedicated client for quick stream availability checks without waiting too long
+    private val quickClient = client.newBuilder()
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(5, TimeUnit.SECONDS)
+        .build()
+
+    fun saveManualMapping(context: Context, jioChannelId: String, m3uName: String, m3uUrl: String) {
+        val cache = getChannelCacheMap(context)
+        // Store URL mappedName manually within the legacy structure to avoid modifying CineTvModels.kt destructively
+        val entry = cache[jioChannelId] ?: ChannelCacheEntry(jioChannelId, normalizeName(m3uName), PlaybackSource.M3U)
+        entry.mappedM3uName = m3uName
+        entry.lastSuccessfulUrl = m3uUrl
+        entry.isManualMapping = true
+        entry.preferredSource = PlaybackSource.M3U
+        saveChannelCache(context, entry)
+    }
+
+    fun removeManualMapping(context: Context, channelId: String) {
+        val cache = getChannelCacheMap(context)
+        val entry = cache[channelId]
+        if (entry != null) {
+            entry.isManualMapping = false
+            entry.mappedM3uName = null
+            saveChannelCache(context, entry)
+        }
+    }
+
+    fun generateSmartFilterKeyword(m3uName: String): String {
+        var n = m3uName.lowercase()
+        val stops = listOf("hd", "sd", "hindi", "tamil", "english", "malayalam", "punjabi", "telugu", "kannada", "marathi", "gujarati", "bengali", "odia", "4k", "uhd", "hevc")
+        for (w in stops) n = n.replace(Regex("\\b$w\\b"), "")
+        n = n.replace(Regex("[^a-z0-9 ]"), "").trim()
+        val parts = n.split(" ").filter { it.length > 2 }
+        return if (parts.isNotEmpty()) parts.first() else n
+    }
+
+    suspend fun testStreamUrl(url: String, headers: Map<String, String>): String = withContext(Dispatchers.IO) {
+        try {
+            val reqBuilder = Request.Builder().url(url).head()
+            headers.forEach { (k, v) -> reqBuilder.header(k, v) }
+            if (!headers.containsKey("User-Agent")) reqBuilder.header("User-Agent", JIO_USER_AGENT)
+
+            quickClient.newCall(reqBuilder.build()).execute().use { res ->
+                return@withContext when (res.code) {
+                    in 200..299 -> "Working"
+                    403 -> "403 Forbidden"
+                    404 -> "404 Not Found"
+                    else -> "Playlist Error (${res.code})"
+                }
+            }
+        } catch (e: Exception) {
+            if (e.message?.contains("timeout", true) == true) return@withContext "Timeout"
+            return@withContext "Connection Error"
+        }
+    }
+
+    data class PlaylistMeta(val name: String, val channelCount: Int, val lastUpdated: Long)
+
+    fun getPlaylistMeta(context: Context): PlaylistMeta {
+        val prefs = context.getSharedPreferences("JioTvSmartCache", Context.MODE_PRIVATE)
+        return PlaylistMeta(
+            name = "in.m3u",
+            channelCount = prefs.getInt("playlistCount", 0),
+            lastUpdated = prefs.getLong("playlistUpdated", 0L)
+        )
+    }
+
+    suspend fun syncPlaylistFromUrl(context: Context, url: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val request = Request.Builder().url(url).build()
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: return@withContext false
+                    if (body.contains("#EXTM3U")) {
+                        saveM3uText(context, body)
+                        val prefs = context.getSharedPreferences("JioTvSmartCache", Context.MODE_PRIVATE)
+                        prefs.edit()
+                            .putLong("playlistUpdated", System.currentTimeMillis())
+                            .putInt("playlistCount", body.split("#EXTINF").size - 1)
+                            .apply()
+                        return@withContext true
+                    }
+                }
+            }
+        } catch (e: Exception) {}
+        return@withContext false
     }
 }
