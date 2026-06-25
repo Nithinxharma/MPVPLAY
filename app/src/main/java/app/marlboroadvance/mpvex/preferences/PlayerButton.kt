@@ -56,7 +56,9 @@ enum class PlayerButton(
   CUSTOM_SKIP(Icons.Outlined.FastForward),
   BACKGROUND_PLAYBACK(Icons.Outlined.Headset),
   AMBIENT_MODE(Icons.Outlined.BlurOn),
-  MEDIA_INFO(Icons.Outlined.Info), // <-- ADDED MEDIA_INFO BUTTON
+
+  CHANNEL_INFO(Icons.Outlined.LiveTv),
+
   NONE(Icons.Outlined.Bookmarks),
 }
 
