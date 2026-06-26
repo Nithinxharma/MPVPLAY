@@ -314,9 +314,8 @@ class PlayerActivity :
     overridePendingTransition(android.R.anim.fade_in, 0)
     super.onCreate(savedInstanceState)
     setContentView(binding.root)
-
-// In PlayerActivity.kt, inside onCreate():
-val metaTitle = intent.getStringExtra("meta_title")
+// Inside PlayerActivity.onCreate():
+val metaTitle = intent.getStringExtra("meta_title") 
 if (metaTitle != null) {
     viewModel.updateMediaInfo(
         artwork = intent.getStringExtra("meta_artwork"),
@@ -331,11 +330,6 @@ if (metaTitle != null) {
     viewModel.showMediaInfo()
 }
 
-
-
-
-
-    
 
     pendingIntentExtras = true
     setupMPV()
