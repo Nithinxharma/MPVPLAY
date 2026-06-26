@@ -43,6 +43,7 @@ import app.marlboroadvance.mpvex.youtube.data.InvidiousClient
 import app.marlboroadvance.mpvex.youtube.model.YoutubeVideo
 import app.marlboroadvance.mpvex.ui.browser.components.BrowserTopBar
 import app.marlboroadvance.mpvex.ui.player.controls.components.MediaType
+import app.marlboroadvance.mpvex.ui.player.MediaMetadataBridge
 import org.koin.compose.koinInject
 import kotlinx.coroutines.launch
 import java.io.File
