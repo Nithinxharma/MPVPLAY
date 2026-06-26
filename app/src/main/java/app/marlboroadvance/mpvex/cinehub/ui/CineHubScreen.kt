@@ -468,23 +468,24 @@ val viewModel: PlayerViewModel = koinInject()
 
                             Spacer(modifier = Modifier.height(20.dp))
                                                                                    Button(
-                                onClick = {
-                                    // Update metadata overlay before launching PlayerActivity
-                                    viewModel.updateMediaInfo(
-                                        type = MediaType.MOVIE,
-                                        artworkUrl = movie.posterPath,
-                                        title = movie.title,
-                                        subtitle = movie.premiered ?: "",
-                                        description = movie.plot,
-                                        metadata = mapOf(
-                                            "Genre" to movie.genre,
-                                            "Rating" to movie.userRating.toString()
-                                        )
-                                    )
-                                    
-                                    selectedMovie = null
-                                    onPlayRequested(movie.videoFilePath, movie.title)
-                                },
+                               onClick = {
+    // We use the exact names from your MediaInfo data class and MediaInfoCard definition
+    viewModel.updateMediaInfo(
+        mediaType = MediaType.MOVIE,    // Matches MediaInfo data class 'type' (in your code it's probably 'mediaType')
+        artwork = movie.posterPath,     // Matches MediaInfoCard parameter 'artwork'
+        title = movie.title,
+        subtitle = movie.premiered ?: "",
+        description = movie.plot,
+        metadata = mapOf(
+            "Genre" to movie.genre,
+            "Rating" to movie.userRating.toString()
+        )
+    )
+    
+    selectedMovie = null
+    onPlayRequested(movie.videoFilePath, movie.title)
+},
+
                                 modifier = Modifier.fillMaxWidth(),
                                                                                      
 
