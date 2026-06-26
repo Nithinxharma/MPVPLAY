@@ -467,11 +467,11 @@ val viewModel: PlayerViewModel = koinInject()
                             }
 
                             Spacer(modifier = Modifier.height(20.dp))
-                                                       Button(
+                                                                                   Button(
                                 onClick = {
                                     // Update metadata overlay before launching PlayerActivity
                                     viewModel.updateMediaInfo(
-                                        mediaType = MediaType.MOVIE,
+                                        type = MediaType.MOVIE,
                                         artworkUrl = movie.posterPath,
                                         title = movie.title,
                                         subtitle = movie.premiered ?: "",
@@ -486,6 +486,7 @@ val viewModel: PlayerViewModel = koinInject()
                                     onPlayRequested(movie.videoFilePath, movie.title)
                                 },
                                 modifier = Modifier.fillMaxWidth(),
+                                                                                     
 
                                 shape = RoundedCornerShape(14.dp)
                             ) {
