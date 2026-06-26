@@ -145,18 +145,23 @@ object MainScreen : Screen {
           add(
             VisibleTab("cinehub", "CineHub", Icons.Filled.Movie) {
               CineHubScreen(
-                moviesList = cachedMovies,
-                tvShowsList = cachedTvShows,
-                onPlayRequested = { filePath, cleanTitle ->
-                  val intent = Intent(context, PlayerActivity::class.java).apply {
-                    action = Intent.ACTION_VIEW
-                    data = Uri.fromFile(File(filePath))
-                    putExtra("title", cleanTitle)
-                    putExtra("force_title", cleanTitle)
-                  }
-                  context.startActivity(intent)
-                }
-              )
+    moviesList = cachedMovies,
+    tvShowsList = cachedTvShows,
+    onPlayRequested = { filePath, cleanTitle, metadata -> // Ensure your CineHubScreen accepts 3 parameters
+        val intent = Intent(context, PlayerActivity::class.java).apply {
+            action = Intent.ACTION_VIEW
+            data = Uri.fromFile(File(filePath))
+            putExtra("title", cleanTitle)
+            putExtra("force_title", cleanTitle)
+            // Add the metadata to the intent
+            metadata.forEach { (key, value) -> 
+                putExtra("meta_$key", value) 
+            }
+        }
+        context.startActivity(intent)
+    }
+)
+
             }
           )
         }
