@@ -315,6 +315,29 @@ class PlayerActivity :
     super.onCreate(savedInstanceState)
     setContentView(binding.root)
 
+
+    // In PlayerActivity.onCreate
+val metaTitle = intent.getStringExtra("meta_title")
+if (metaTitle != null) {
+    viewModel.updateMediaInfo(
+        artwork = intent.getStringExtra("meta_artwork"),
+        title = metaTitle,
+        subtitle = intent.getStringExtra("meta_subtitle"),
+        description = intent.getStringExtra("meta_description"),
+        metadata = mapOf(
+            "Genre" to (intent.getStringExtra("meta_genre") ?: ""),
+            "Rating" to (intent.getStringExtra("meta_rating") ?: "")
+        )
+    )
+    viewModel.showMediaInfo() // Trigger the overlay
+}
+
+
+
+
+
+    
+
     pendingIntentExtras = true
     setupMPV()
     viewModel.onMpvCoreInitialized()
