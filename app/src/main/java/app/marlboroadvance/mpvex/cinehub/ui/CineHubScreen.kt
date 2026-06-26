@@ -463,12 +463,26 @@ fun CineHubScreen(
                             }
 
                             Spacer(modifier = Modifier.height(20.dp))
-                            Button(
+                                                       Button(
                                 onClick = {
+                                    // Update metadata overlay before launching PlayerActivity
+                                    viewModel.updateMediaInfo(
+                                        mediaType = MediaType.MOVIE,
+                                        artworkUrl = movie.posterPath,
+                                        title = movie.title,
+                                        subtitle = movie.premiered ?: "",
+                                        description = movie.plot,
+                                        metadata = mapOf(
+                                            "Genre" to movie.genre,
+                                            "Rating" to movie.userRating.toString()
+                                        )
+                                    )
+                                    
                                     selectedMovie = null
                                     onPlayRequested(movie.videoFilePath, movie.title)
                                 },
                                 modifier = Modifier.fillMaxWidth(),
+
                                 shape = RoundedCornerShape(14.dp)
                             ) {
                                 Icon(Icons.Default.PlayArrow, contentDescription = "Play")
