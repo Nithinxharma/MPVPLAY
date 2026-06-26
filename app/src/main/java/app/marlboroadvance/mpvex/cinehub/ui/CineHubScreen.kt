@@ -467,34 +467,32 @@ val viewModel: PlayerViewModel = koinInject()
                             }
 
                             Spacer(modifier = Modifier.height(20.dp))
-                                                                                   Button(
-                               onClick = {
-    // We use the exact names from your MediaInfo data class and MediaInfoCard definition
-    viewModel.updateMediaInfo(
-        mediaType = MediaType.MOVIE,    // Matches MediaInfo data class 'type' (in your code it's probably 'mediaType')
-        artwork = movie.posterPath,     // Matches MediaInfoCard parameter 'artwork'
-        title = movie.title,
-        subtitle = movie.premiered ?: "",
-        description = movie.plot,
-        metadata = mapOf(
-            "Genre" to movie.genre,
-            "Rating" to movie.userRating.toString()
+                                                                                   
+ Button(
+    onClick = {
+        // Updated to match your PlayerViewModel's exact parameters
+        viewModel.updateMediaInfo(
+            artwork = movie.posterPath,
+            title = movie.title,
+            subtitle = movie.premiered ?: "",
+            description = movie.plot,
+            metadata = mapOf(
+                "Genre" to movie.genre,
+                "Rating" to movie.userRating.toString()
+            )
         )
-    )
-    
-    selectedMovie = null
-    onPlayRequested(movie.videoFilePath, movie.title)
-},
+        
+        selectedMovie = null
+        onPlayRequested(movie.videoFilePath, movie.title)
+    },
+    modifier = Modifier.fillMaxWidth(),
+    shape = RoundedCornerShape(14.dp)
+) {
+    Icon(Icons.Default.PlayArrow, contentDescription = "Play")
+    Spacer(modifier = Modifier.width(8.dp))
+    Text("Play Full Movie", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+}
 
-                                modifier = Modifier.fillMaxWidth(),
-                                                                                     
-
-                                shape = RoundedCornerShape(14.dp)
-                            ) {
-                                Icon(Icons.Default.PlayArrow, contentDescription = "Play")
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Play Full Movie", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                            }
                             Spacer(modifier = Modifier.height(18.dp))
                             Text("Plot Overview", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                             Text(
