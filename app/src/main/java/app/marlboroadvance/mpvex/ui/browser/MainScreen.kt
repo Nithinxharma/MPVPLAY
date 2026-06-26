@@ -144,17 +144,18 @@ object MainScreen : Screen {
         if (enableCineHub) {
           add(
             VisibleTab("cinehub", "CineHub", Icons.Filled.Movie) {
-              // In MainScreen.kt
+// In MainScreen.kt
 CineHubScreen(
     moviesList = cachedMovies,
     tvShowsList = cachedTvShows,
-    onPlayRequested = { filePath, cleanTitle, metadata -> 
+    onPlayRequested = { filePath, cleanTitle, metadata -> // Add metadata here
         val intent = Intent(context, PlayerActivity::class.java).apply {
             action = Intent.ACTION_VIEW
             data = Uri.fromFile(File(filePath))
             putExtra("title", cleanTitle)
             putExtra("force_title", cleanTitle)
-            // Add metadata
+            
+            // Pass metadata through the Intent
             metadata.forEach { (key, value) -> 
                 putExtra("meta_$key", value) 
             }
