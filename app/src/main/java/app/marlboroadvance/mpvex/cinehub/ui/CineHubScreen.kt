@@ -244,9 +244,9 @@ fun CineHubScreen(
                                                             val platformCode = movieItem.videoFilePath.substringAfterLast(":")
                                                             val directM3u8 = CineCloudRepoClient.resolveDirectStreamUrl(rawId, platformCode)
                                                             if (!directM3u8.isNullOrBlank()) {
-                                                                onPlayRequested(directM3u8, movieItem.title)
+                                                                onPlayRequested(directM3u8, movieItem.title, emptyMap())
                                                             } else {
-                                                                onPlayRequested("https://net52.cc/mobile/player.php?id=$rawId", movieItem.title)
+                                                                onPlayRequested("https://net52.cc/mobile/player.php?id=$rawId", movieItem.title, emptyMap())
                                                             }
                                                         }
                                                     }
@@ -295,9 +295,9 @@ fun CineHubScreen(
                                                             val platformCode = tvShowItem.folderPath.substringAfterLast(":")
                                                             val directM3u8 = CineCloudRepoClient.resolveDirectStreamUrl(rawId, platformCode)
                                                             if (!directM3u8.isNullOrBlank()) {
-                                                                onPlayRequested(directM3u8, tvShowItem.title)
+                                                                onPlayRequested(directM3u8, tvShowItem.title, emptyMap())
                                                             } else {
-                                                                onPlayRequested("https://net52.cc/mobile/player.php?id=$rawId", tvShowItem.title)
+                                                                onPlayRequested("https://net52.cc/mobile/player.php?id=$rawId", tvShowItem.title, emptyMap())
                                                             }
                                                         }
                                                     }
@@ -373,7 +373,7 @@ fun CineHubScreen(
                                             scope.launch {
                                                 val directUrl = InvidiousClient.fetchDirectStreamUrl(ytVideo.videoId)
                                                 if (directUrl != null) {
-                                                    onPlayRequested(directUrl, "${movie.title} - Trailer")
+                                                    onPlayRequested(directUrl, "${movie.title} - Trailer", emptyMap())
                                                 }
                                             }
                                         }
@@ -466,33 +466,33 @@ fun CineHubScreen(
                             }
 
                             Spacer(modifier = Modifier.height(20.dp))
-                                                                                   
- Button(
-    onClick = {
-    // 1. Safely store metadata in the bridge
-    MediaMetadataBridge.setMetadata(
-        type = MediaType.MOVIE,
-        artwork = movie.posterPath,
-        title = movie.title,
-        subtitle = movie.premiered ?: "",
-        description = movie.plot,
-        metadata = mapOf(
-            "Genre" to movie.genre,
-            "Rating" to movie.userRating.toString()
-        )
-    )
-    
-    // 2. Launch playback
-    selectedMovie = null
-    onPlayRequested(movie.videoFilePath, movie.title)
-},  
-  modifier = Modifier.fillMaxWidth(),
-    shape = RoundedCornerShape(14.dp)
-) {
-    Icon(Icons.Default.PlayArrow, contentDescription = "Play")
-    Spacer(modifier = Modifier.width(8.dp))
-    Text("Play Full Movie", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-}
+                                                                      
+                            Button(
+                                onClick = {
+                                    // 1. Safely store metadata in the bridge
+                                    MediaMetadataBridge.setMetadata(
+                                        type = MediaType.MOVIE,
+                                        artwork = movie.posterPath,
+                                        title = movie.title,
+                                        subtitle = movie.premiered ?: "",
+                                        description = movie.plot,
+                                        metadata = mapOf(
+                                            "Genre" to movie.genre,
+                                            "Rating" to movie.userRating.toString()
+                                        )
+                                    )
+                                    
+                                    // 2. Launch playback
+                                    selectedMovie = null
+                                    onPlayRequested(movie.videoFilePath, movie.title, emptyMap())
+                                },  
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Icon(Icons.Default.PlayArrow, contentDescription = "Play")
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Play Full Movie", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            }
 
                             Spacer(modifier = Modifier.height(18.dp))
                             Text("Plot Overview", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -608,7 +608,7 @@ fun CineHubScreen(
                                             IconButton(
                                                 onClick = {
                                                     selectedTvShow = null
-                                                    onPlayRequested(episode.videoFilePath, "${show.title} - S${episode.season}E${episode.episode}")
+                                                    onPlayRequested(episode.videoFilePath, "${show.title} - S${episode.season}E${episode.episode}", emptyMap())
                                                 },
                                                 colors = IconButtonDefaults.iconButtonColors(
                                                     containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
