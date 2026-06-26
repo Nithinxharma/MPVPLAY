@@ -53,7 +53,7 @@ import java.io.File
 fun CineHubScreen(
     moviesList: List<MovieItem>,
     tvShowsList: List<TvShowItem>,
-    onPlayRequested: (filePath: String, cleanTitle: String) -> Unit
+    onPlayRequested: (filePath: String, cleanTitle: String, metadata: Map<String, String>) -> Unit // Added metadata param
 ) {
     var tabIndex by remember { mutableIntStateOf(0) }
     val tabs = listOf("Movies", "TV Shows")
