@@ -315,8 +315,7 @@ class PlayerActivity :
     super.onCreate(savedInstanceState)
     setContentView(binding.root)
 
-
-    // In PlayerActivity.onCreate
+// In PlayerActivity.kt, inside onCreate():
 val metaTitle = intent.getStringExtra("meta_title")
 if (metaTitle != null) {
     viewModel.updateMediaInfo(
@@ -325,11 +324,11 @@ if (metaTitle != null) {
         subtitle = intent.getStringExtra("meta_subtitle"),
         description = intent.getStringExtra("meta_description"),
         metadata = mapOf(
-            "Genre" to (intent.getStringExtra("meta_genre") ?: ""),
-            "Rating" to (intent.getStringExtra("meta_rating") ?: "")
+            "Genre" to (intent.getStringExtra("meta_Genre") ?: ""),
+            "Rating" to (intent.getStringExtra("meta_Rating") ?: "")
         )
     )
-    viewModel.showMediaInfo() // Trigger the overlay
+    viewModel.showMediaInfo()
 }
 
 
