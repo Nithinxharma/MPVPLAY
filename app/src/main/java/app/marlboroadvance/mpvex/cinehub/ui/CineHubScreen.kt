@@ -468,14 +468,24 @@ fun CineHubScreen(
                                                                                    
  Button(
     onClick = {
-    // We remove the viewModel call to fix the 'NoDefinitionFoundException' crash
-    selectedMovie = null
+    // 1. Safely store metadata in the bridge
+    MediaMetadataBridge.setMetadata(
+        type = MediaType.MOVIE,
+        artwork = movie.posterPath,
+        title = movie.title,
+        subtitle = movie.premiered ?: "",
+        description = movie.plot,
+        metadata = mapOf(
+            "Genre" to movie.genre,
+            "Rating" to movie.userRating.toString()
+        )
+    )
     
-    // Pass the metadata directly to the player request
-    // You will need to ensure your onPlayRequested supports receiving this info
+    // 2. Launch playback
+    selectedMovie = null
     onPlayRequested(movie.videoFilePath, movie.title)
-},
-    modifier = Modifier.fillMaxWidth(),
+},  
+  modifier = Modifier.fillMaxWidth(),
     shape = RoundedCornerShape(14.dp)
 ) {
     Icon(Icons.Default.PlayArrow, contentDescription = "Play")
