@@ -40,7 +40,7 @@ import app.marlboroadvance.mpvex.cinehub.model.ActorItem
 import app.marlboroadvance.mpvex.cinehub.data.NfoScanner
 import app.marlboroadvance.mpvex.cinehub.data.CineCloudRepoClient
 import app.marlboroadvance.mpvex.youtube.data.InvidiousClient
-import import app.marlboroadvance.mpvex.youtube.model.YoutubeVideo
+import app.marlboroadvance.mpvex.youtube.model.YoutubeVideo
 import app.marlboroadvance.mpvex.ui.browser.components.BrowserTopBar
 import app.marlboroadvance.mpvex.ui.player.controls.components.MediaType
 import app.marlboroadvance.mpvex.ui.player.PlayerViewModel
