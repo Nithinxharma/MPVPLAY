@@ -40,8 +40,11 @@ import app.marlboroadvance.mpvex.cinehub.model.ActorItem
 import app.marlboroadvance.mpvex.cinehub.data.NfoScanner
 import app.marlboroadvance.mpvex.cinehub.data.CineCloudRepoClient
 import app.marlboroadvance.mpvex.youtube.data.InvidiousClient
-import app.marlboroadvance.mpvex.youtube.model.YoutubeVideo
+import import app.marlboroadvance.mpvex.youtube.model.YoutubeVideo
 import app.marlboroadvance.mpvex.ui.browser.components.BrowserTopBar
+import app.marlboroadvance.mpvex.ui.player.controls.components.MediaType
+import app.marlboroadvance.mpvex.ui.player.PlayerViewModel
+import org.koin.compose.koinInject
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -66,6 +69,7 @@ fun CineHubScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val configuration = LocalConfiguration.current
+val viewModel: PlayerViewModel = koinInject()
     val gridColumnCount = if (configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) 6 else 3
 
     LaunchedEffect(tabIndex) {
