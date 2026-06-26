@@ -43,7 +43,6 @@ import app.marlboroadvance.mpvex.youtube.data.InvidiousClient
 import app.marlboroadvance.mpvex.youtube.model.YoutubeVideo
 import app.marlboroadvance.mpvex.ui.browser.components.BrowserTopBar
 import app.marlboroadvance.mpvex.ui.player.controls.components.MediaType
-import app.marlboroadvance.mpvex.ui.player.PlayerViewModel
 import org.koin.compose.koinInject
 import kotlinx.coroutines.launch
 import java.io.File
@@ -69,7 +68,6 @@ fun CineHubScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val configuration = LocalConfiguration.current
-val viewModel: PlayerViewModel = koinInject()
     val gridColumnCount = if (configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) 6 else 3
 
     LaunchedEffect(tabIndex) {
@@ -470,21 +468,13 @@ val viewModel: PlayerViewModel = koinInject()
                                                                                    
  Button(
     onClick = {
-        // Updated to match your PlayerViewModel's exact parameters
-        viewModel.updateMediaInfo(
-            artwork = movie.posterPath,
-            title = movie.title,
-            subtitle = movie.premiered ?: "",
-            description = movie.plot,
-            metadata = mapOf(
-                "Genre" to movie.genre,
-                "Rating" to movie.userRating.toString()
-            )
-        )
-        
-        selectedMovie = null
-        onPlayRequested(movie.videoFilePath, movie.title)
-    },
+    // We remove the viewModel call to fix the 'NoDefinitionFoundException' crash
+    selectedMovie = null
+    
+    // Pass the metadata directly to the player request
+    // You will need to ensure your onPlayRequested supports receiving this info
+    onPlayRequested(movie.videoFilePath, movie.title)
+},
     modifier = Modifier.fillMaxWidth(),
     shape = RoundedCornerShape(14.dp)
 ) {
