@@ -148,7 +148,7 @@ object MainScreen : Screen {
 CineHubScreen(
     moviesList = cachedMovies,
     tvShowsList = cachedTvShows,
-    onPlayRequested = { filePath, cleanTitle, metadata -> // Add metadata here
+    onPlayRequested = { filePath: String, cleanTitle: String, metadata: Map<String, String> -> 
         val intent = Intent(context, PlayerActivity::class.java).apply {
             action = Intent.ACTION_VIEW
             data = Uri.fromFile(File(filePath))
@@ -163,6 +163,7 @@ CineHubScreen(
         context.startActivity(intent)
     }
 )
+
 
 
             }
