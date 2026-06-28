@@ -286,11 +286,12 @@ fun VideoCardPremium(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // Info Section
+                // Info Section
         Row(
             modifier = Modifier.fillMaxWidth(),
-            crossAxisAlignment = CrossAxisAlignment.Top
+            verticalAlignment = Alignment.Top
         ) {
+          
             // Channel Avatar
             AsyncImage(
                 model = video.getBestAuthorThumbnailUrl() ?: "https://ui-avatars.com/api/?name=${video.author}&background=random",
