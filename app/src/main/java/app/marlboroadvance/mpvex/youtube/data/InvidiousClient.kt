@@ -11,11 +11,14 @@ import java.util.concurrent.TimeUnit
 
 object InvidiousClient {
     private val client = OkHttpClient.Builder()
-        .connectTimeout(5, TimeUnit.SECONDS)
-        .readTimeout(5, TimeUnit.SECONDS)
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(8, TimeUnit.SECONDS)
         .build()
 
-    private val jsonParser = Json { ignoreUnknownKeys = true; coerceInputValues = true }
+    private val jsonParser = Json { 
+        ignoreUnknownKeys = true
+        coerceInputValues = true 
+    }
     
     // Fail-proof premium dynamic instances matrix with high availability
     private val INSTANCES = listOf(
@@ -26,12 +29,10 @@ object InvidiousClient {
     )
 
     /**
-     * --- UPDATED FOR INDIA ---
-     * Fetches trending videos specifically popular in India by forcing the region=IN parameter
+     * Fetches trending videos specifically popular in India by forcing the region=IN parameter.
      */
     suspend fun fetchTrendingVideos(type: String = "Movies"): List<YoutubeVideo> = withContext(Dispatchers.IO) {
         for (baseUrl in INSTANCES) {
-            // Injected region=IN to pull popular Indian creators, trailers, and regional music
             val url = "$baseUrl/api/v1/trending?type=$type&region=IN"
             val request = Request.Builder()
                 .url(url)
@@ -57,7 +58,8 @@ object InvidiousClient {
     }
 
     /**
-     * Extracts direct progressive play streams with dynamic redundant structural loops
+     * Automatically extracts the best direct progressive play stream.
+     * Priority: 1080p MP4 -> 720p MP4 -> Highest MP4 -> Best adaptive.
      */
     suspend fun fetchDirectStreamUrl(videoId: String): String? = withContext(Dispatchers.IO) {
         for (baseUrl in INSTANCES) {
@@ -73,11 +75,36 @@ object InvidiousClient {
                         val responseBody = response.body?.string() ?: return@use
                         val parsed = jsonParser.decodeFromString<VideoDataResponse>(responseBody)
                         
-                        val streamUrl = parsed.formatStreams.firstOrNull { it.container == "mp4" }?.url
-                            ?: parsed.formatStreams.firstOrNull()?.url
-                            ?: parsed.adaptiveFormats.firstOrNull { it.container == "mp4" }?.url
+                        val mp4Streams = parsed.formatStreams.filter { it.container == "mp4" }
                         
-                        if (streamUrl != null) return@withContext streamUrl
+                        // 1. Attempt 1080p progressive
+                        var bestStream = mp4Streams.filter { it.qualityLabel.contains("1080") }
+                            .maxByOrNull { it.bitrate }?.url
+                            
+                        // 2. Attempt 720p progressive
+                        if (bestStream == null) {
+                            bestStream = mp4Streams.filter { it.qualityLabel.contains("720") }
+                                .maxByOrNull { it.bitrate }?.url
+                        }
+                        
+                        // 3. Fallback to highest available progressive MP4
+                        if (bestStream == null) {
+                            bestStream = mp4Streams.maxByOrNull { it.bitrate }?.url
+                        }
+
+                        // 4. Fallback to highest bitrate adaptive video stream
+                        if (bestStream == null) {
+                            bestStream = parsed.adaptiveFormats
+                                .filter { it.container == "mp4" && it.type.startsWith("video") }
+                                .maxByOrNull { it.bitrate }?.url
+                        }
+                        
+                        // 5. Ultimate fallback
+                        if (bestStream == null) {
+                            bestStream = parsed.formatStreams.firstOrNull()?.url
+                        }
+
+                        if (bestStream != null) return@withContext bestStream
                     }
                 }
             } catch (e: Exception) {
@@ -88,8 +115,7 @@ object InvidiousClient {
     }
 
     /**
-     * --- UPDATED FOR INDIA ---
-     * Searches global YouTube index database and appends region preference if needed
+     * Searches global YouTube index database and appends region preference if needed.
      */
     suspend fun fetchSearchVideos(query: String): List<YoutubeVideo> = withContext(Dispatchers.IO) {
         val encodedQuery = try {
@@ -99,7 +125,6 @@ object InvidiousClient {
         }
 
         for (baseUrl in INSTANCES) {
-            // Appended region=IN to prioritize Indian relevance algorithms during global search queries
             val url = "$baseUrl/api/v1/search?q=$encodedQuery&type=video&region=IN"
             val request = Request.Builder()
                 .url(url)
