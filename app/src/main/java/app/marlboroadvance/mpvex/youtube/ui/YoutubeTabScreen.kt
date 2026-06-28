@@ -1,26 +1,29 @@
 package app.marlboroadvance.mpvex.youtube.ui
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.HighQuality
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
@@ -34,10 +37,17 @@ import app.marlboroadvance.mpvex.ui.browser.components.BrowserTopBar
 import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun YoutubeTabScreen(
-    onPlayRequested: (String, String) -> Unit
+    onPlayRequested: (String, String) -> Unit,
+    onUpdateMediaInfo: (
+        thumbnail: String,
+        title: String,
+        author: String,
+        description: String,
+        metadata: Map<String, String>
+    ) -> Unit = { _, _, _, _, _ -> }
 ) {
     var videoList by remember { mutableStateOf<List<YoutubeVideo>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
@@ -46,9 +56,10 @@ fun YoutubeTabScreen(
     var isSearchBarVisible by remember { mutableStateOf(false) } 
     var refreshTrigger by remember { mutableIntStateOf(0) }
     
-    var selectedVideoForQuality by remember { mutableStateOf<YoutubeVideo?>(null) }
-    var isQualitySheetOpen by remember { mutableStateOf(false) }
-
+    // Bottom Sheet States
+    var longPressedVideo by remember { mutableStateOf<YoutubeVideo?>(null) }
+    var clickedChannelVideo by remember { mutableStateOf<YoutubeVideo?>(null) }
+    
     val scope = rememberCoroutineScope()
     val keyboardController = LocalSoftwareKeyboardController.current
 
@@ -65,9 +76,8 @@ fun YoutubeTabScreen(
     Scaffold(
         topBar = {
             Column(modifier = Modifier.fillMaxWidth()) {
-                // --- UPDATED BRANDING: CineTube Live Layout Injected ---
                 BrowserTopBar(
-                    title = if (isSearching) "Search Results" else "CineTube Live Stream",
+                    title = if (isSearching) "Search Results" else "CineTube Live",
                     isInSelectionMode = false,
                     selectedCount = 0,
                     totalCount = videoList.size,
@@ -80,12 +90,12 @@ fun YoutubeTabScreen(
 
                 AnimatedVisibility(
                     visible = isSearchBarVisible,
-                    enter = fadeIn(),
-                    exit = fadeOut()
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
                 ) {
                     Surface(
-                        color = MaterialTheme.colorScheme.surfaceContainerLow,
-                        tonalElevation = 1.dp,
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+                        tonalElevation = 4.dp,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         OutlinedTextField(
@@ -93,8 +103,11 @@ fun YoutubeTabScreen(
                             onValueChange = { searchQuery = it },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(start = 16.dp, end = 16.dp, bottom = 12.dp, top = 8.dp),
-                            placeholder = { Text("Search CineTube vectors popular in India...") },
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            placeholder = { Text("Search CineTube library...") },
+                            leadingIcon = {
+                                Icon(Icons.Default.Search, contentDescription = "Search Icon", tint = MaterialTheme.colorScheme.primary)
+                            },
                             trailingIcon = {
                                 if (searchQuery.isNotEmpty() || isSearching) {
                                     IconButton(onClick = {
@@ -112,7 +125,9 @@ fun YoutubeTabScreen(
                             shape = RoundedCornerShape(24.dp),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
                             ),
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                             keyboardActions = KeyboardActions(onSearch = {
@@ -133,164 +148,440 @@ fun YoutubeTabScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            if (isLoading) {
-                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-            } else if (videoList.isEmpty()) {
-                Column(
-                    modifier = Modifier.align(Alignment.Center),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        text = if (isSearching) "No search results found for India." else "Network timeout or node offline.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.outline
+            Crossfade(targetState = isLoading, label = "LoadingTransition") { loading ->
+                if (loading) {
+                    SkeletonLoadingGrid()
+                } else if (videoList.isEmpty()) {
+                    ErrorStateUi(
+                        isSearching = isSearching,
+                        onRetry = { refreshTrigger++ }
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Button(onClick = { refreshTrigger++ }) {
-                        Text(text = if (isSearching) "Refresh Search" else "Retry Connection", fontWeight = FontWeight.Bold)
-                    }
-                }
-            } else {
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 160.dp),
-                    contentPadding = PaddingValues(12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    items(videoList) { video ->
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    selectedVideoForQuality = video
-                                    isQualitySheetOpen = true
-                                },
-                            shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
-                        ) {
-                            Column {
-                                Box(modifier = Modifier.fillMaxWidth()) {
-                                    AsyncImage(
-                                        model = video.getBestThumbnailUrl(),
-                                        contentDescription = video.title,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .aspectRatio(16f / 9f)
-                                            .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)),
-                                        contentScale = ContentScale.Crop
-                                    )
-                                    
-                                    if (video.lengthSeconds > 0) {
-                                        val minutes = video.lengthSeconds / 60
-                                        val seconds = video.lengthSeconds % 60
-                                        Surface(
-                                            color = Color.Black.copy(alpha = 0.75f),
-                                            shape = RoundedCornerShape(4.dp),
-                                            modifier = Modifier
-                                                .align(Alignment.BottomEnd)
-                                                .padding(6.dp)
-                                        ) {
-                                            Text(
-                                                text = String.format("%d:%02d", minutes, seconds),
-                                                color = Color.White,
-                                                fontSize = 11.sp,
-                                                modifier = Modifier.padding(start = 6.dp, top = 2.dp, end = 6.dp, bottom = 2.dp),
-                                                fontWeight = FontWeight.Bold
+                } else {
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = 320.dp), // Wide premium cards
+                        contentPadding = PaddingValues(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(24.dp),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        items(
+                            items = videoList,
+                            key = { it.videoId }
+                        ) { video ->
+                            VideoCardPremium(
+                                video = video,
+                                onClick = {
+                                    scope.launch {
+                                        // Update Media Info Metadata Before Playback
+                                        onUpdateMediaInfo(
+                                            video.getBestThumbnailUrl(),
+                                            video.title,
+                                            video.author,
+                                            video.description,
+                                            mapOf(
+                                                "Views" to video.formatViewCount(),
+                                                "Published" to video.publishedText,
+                                                "Duration" to "${video.lengthSeconds}s",
+                                                "Video ID" to video.videoId
                                             )
+                                        )
+                                        
+                                        // Auto-fetch best progressive stream & Play
+                                        val directStreamUrl = InvidiousClient.fetchDirectStreamUrl(video.videoId)
+                                        if (directStreamUrl != null) {
+                                            onPlayRequested(directStreamUrl, video.title)
                                         }
                                     }
-                                }
-                                Column(modifier = Modifier.padding(8.dp)) {
-                                    Text(
-                                        text = video.title,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        text = video.author,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        maxLines = 1,
-                                        color = MaterialTheme.colorScheme.outline
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (isQualitySheetOpen && selectedVideoForQuality != null) {
-                ModalBottomSheet(
-                    onDismissRequest = { 
-                        isQualitySheetOpen = false
-                        selectedVideoForQuality = null
-                    },
-                    sheetState = rememberModalBottomSheetState()
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(start = 24.dp, top = 0.dp, end = 24.dp, bottom = 36.dp)
-                    ) {
-                        Text(
-                            text = "Select Video Quality",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.ExtraBold
-                        )
-                        Text(
-                            text = selectedVideoForQuality!!.title,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.outline,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(top = 4.dp, bottom = 16.dp)
-                        )
-                        
-                        HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        val qualityOptions = listOf(
-                            Pair("1080p FHD Stream", "Best resolution with top bitrate performance"),
-                            Pair("720p HD Stream", "Balanced output for smooth data buffering"),
-                            Pair("360p SD Stream", "Low network bandwidth data saving format")
-                        )
-
-                        qualityOptions.forEach { option ->
-                            ListItem(
-                                headlineContent = { Text(option.first, fontWeight = FontWeight.Bold) },
-                                supportingContent = { Text(option.second) },
-                                leadingContent = { 
-                                    Icon(
-                                        imageVector = Icons.Default.HighQuality, 
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary
-                                    ) 
                                 },
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .clickable {
-                                        val targetVideo = selectedVideoForQuality!!
-                                        isQualitySheetOpen = false
-                                        selectedVideoForQuality = null
-                                        
-                                        scope.launch {
-                                            val directStreamUrl = InvidiousClient.fetchDirectStreamUrl(targetVideo.videoId)
-                                            if (directStreamUrl != null) {
-                                                onPlayRequested(directStreamUrl, targetVideo.title)
-                                            }
-                                        }
-                                    },
-                                colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+                                onLongClick = { longPressedVideo = video },
+                                onChannelClick = { clickedChannelVideo = video }
                             )
                         }
                     }
                 }
             }
+
+            // Context Menu Bottom Sheet
+            if (longPressedVideo != null) {
+                ContextMenuBottomSheet(
+                    video = longPressedVideo!!,
+                    onDismiss = { longPressedVideo = null }
+                )
+            }
+
+            // Channel Info Bottom Sheet
+            if (clickedChannelVideo != null) {
+                ChannelInfoBottomSheet(
+                    video = clickedChannelVideo!!,
+                    onDismiss = { clickedChannelVideo = null }
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun VideoCardPremium(
+    video: YoutubeVideo,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    onChannelClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            )
+    ) {
+        // Thumbnail Box
+        Box(modifier = Modifier.fillMaxWidth()) {
+            AsyncImage(
+                model = video.getBestThumbnailUrl(),
+                contentDescription = video.title,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(16f / 9f)
+                    .clip(RoundedCornerShape(16.dp)),
+                contentScale = ContentScale.Crop
+            )
+            
+            // Badges Top Right
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                if (video.isLiveNow) {
+                    BadgeChip(text = "LIVE", color = Color.Red)
+                }
+                BadgeChip(text = "HD", color = MaterialTheme.colorScheme.primary)
+            }
+
+            // Duration Bottom Right
+            if (video.lengthSeconds > 0) {
+                val minutes = video.lengthSeconds / 60
+                val seconds = video.lengthSeconds % 60
+                Surface(
+                    color = Color.Black.copy(alpha = 0.85f),
+                    shape = RoundedCornerShape(6.dp),
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(8.dp)
+                ) {
+                    Text(
+                        text = String.format("%d:%02d", minutes, seconds),
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Info Section
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            crossAxisAlignment = CrossAxisAlignment.Top
+        ) {
+            // Channel Avatar
+            AsyncImage(
+                model = video.getBestAuthorThumbnailUrl() ?: "https://ui-avatars.com/api/?name=${video.author}&background=random",
+                contentDescription = video.author,
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .clickable { onChannelClick() },
+                contentScale = ContentScale.Crop
+            )
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            // Text Metadata
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = video.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    lineHeight = 20.sp
+                )
+                
+                Spacer(modifier = Modifier.height(4.dp))
+                
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = video.author,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = "Verified",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        modifier = Modifier
+                            .padding(start = 4.dp)
+                            .size(14.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(2.dp))
+
+                Text(
+                    text = "${video.formatViewCount()} • ${video.publishedText}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.outline,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            
+            IconButton(onClick = onLongClick, modifier = Modifier.size(24.dp)) {
+                Icon(
+                    imageVector = Icons.Default.MoreVert,
+                    contentDescription = "More Options",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun BadgeChip(text: String, color: Color) {
+    Surface(
+        color = color.copy(alpha = 0.9f),
+        shape = RoundedCornerShape(4.dp)
+    ) {
+        Text(
+            text = text,
+            color = Color.White,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.ExtraBold,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ContextMenuBottomSheet(video: YoutubeVideo, onDismiss: () -> Unit) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 32.dp)
+        ) {
+            // Header
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                AsyncImage(
+                    model = video.getBestThumbnailUrl(),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .width(64.dp)
+                        .aspectRatio(16f / 9f)
+                        .clip(RoundedCornerShape(8.dp)),
+                    contentScale = ContentScale.Crop
+                )
+                Spacer(modifier = Modifier.width(16.dp))
+                Text(
+                    text = video.title,
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outlineVariant)
+
+            val menuItems = listOf(
+                Triple(Icons.Default.PlayArrow, "Play Next", {}),
+                Triple(Icons.Default.WatchLater, "Save to Watch Later", {}),
+                Triple(Icons.Default.Download, "Download Video", {}),
+                Triple(Icons.Default.Share, "Share", {}),
+                Triple(Icons.Default.ContentCopy, "Copy Link", {}),
+                Triple(Icons.Default.Block, "Not Interested", {})
+            )
+
+            menuItems.forEach { (icon, text, action) ->
+                BottomSheetMenuItem(icon = icon, text = text, onClick = {
+                    action()
+                    onDismiss()
+                })
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ChannelInfoBottomSheet(video: YoutubeVideo, onDismiss: () -> Unit) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 16.dp)
+                .padding(bottom = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            AsyncImage(
+                model = video.getBestAuthorThumbnailUrl() ?: "https://ui-avatars.com/api/?name=${video.author}&background=random",
+                contentDescription = video.author,
+                modifier = Modifier
+                    .size(80.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentScale = ContentScale.Crop
+            )
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            Text(
+                text = video.author,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.ExtraBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            
+            Text(
+                text = if(video.subCountText.isNotEmpty()) video.subCountText else "Tap to view channel",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.outline
+            )
+            
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            Button(
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text("View Channel", modifier = Modifier.padding(vertical = 4.dp), fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@Composable
+fun BottomSheetMenuItem(icon: ImageVector, text: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 24.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(imageVector = icon, contentDescription = text, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(modifier = Modifier.width(24.dp))
+        Text(text = text, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+    }
+}
+
+@Composable
+fun SkeletonLoadingGrid() {
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(minSize = 320.dp),
+        contentPadding = PaddingValues(16.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp),
+        modifier = Modifier.fillMaxSize()
+    ) {
+        items(6) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(16f / 9f)
+                        .clip(RoundedCornerShape(16.dp))
+                        .shimmerEffect()
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .shimmerEffect()
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Box(modifier = Modifier.fillMaxWidth().height(20.dp).clip(RoundedCornerShape(4.dp)).shimmerEffect())
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Box(modifier = Modifier.fillMaxWidth(0.6f).height(16.dp).clip(RoundedCornerShape(4.dp)).shimmerEffect())
+                    }
+                }
+            }
+        }
+    }
+}
+
+fun Modifier.shimmerEffect(): Modifier {
+    return this.background(Color.Gray.copy(alpha = 0.2f)) // Placeholder for visual consistency, Compose animations handle core transitions
+}
+
+@Composable
+fun ErrorStateUi(isSearching: Boolean, onRetry: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.WifiOff,
+            contentDescription = "Error",
+            modifier = Modifier.size(80.dp),
+            tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            text = if (isSearching) "No cinematic results found." else "Network timeout. Node offline.",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "Please check your connection or switch nodes.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.outline
+        )
+        Spacer(modifier = Modifier.height(24.dp))
+        Button(
+            onClick = onRetry,
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Text(text = "Retry Connection", fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 16.dp))
         }
     }
 }
