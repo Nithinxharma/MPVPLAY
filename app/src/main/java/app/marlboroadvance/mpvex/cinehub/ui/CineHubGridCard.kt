@@ -30,14 +30,14 @@ fun CineHubGridCard(
     genre: String,
     rating: Double,
     posterPath: String?,
-    watchProgress: Float = 0f, // Embedded from updated data schemas
+    watchProgress: Float = 0f,
     onClick: () -> Unit
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
 
     val animatedScale by animateFloatAsState(
-        targetValue = if (isPressed) 0.95f else 1.0f,
+        targetValue = if (isPressed) 0.94f else 1.0f,
         animationSpec = spring(dampingRatio = 0.6f, stiffness = 300f),
         label = "CardScaleAnimation"
     )
@@ -55,16 +55,16 @@ fun CineHubGridCard(
                 indication = null,
                 onClick = onClick
             ),
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(16.dp),
         border = BorderStroke(
             width = 1.dp,
-            color = MaterialTheme.colorScheme.primary.copy(alpha = if (isPressed) 0.4f else 0.1f)
+            color = MaterialTheme.colorScheme.primary.copy(alpha = if (isPressed) 0.5f else 0.05f)
         ),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.8f)
         ),
         elevation = CardDefaults.cardElevation(
-            defaultElevation = if (isPressed) 2.dp else 6.dp
+            defaultElevation = if (isPressed) 2.dp else 8.dp
         )
     ) {
         Column {
@@ -76,8 +76,8 @@ fun CineHubGridCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .aspectRatio(2f / 3f)
-                        .background(Color.DarkGray)
-                        .clip(RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
                 )
 
                 Box(
@@ -89,7 +89,7 @@ fun CineHubGridCard(
                                 listOf(
                                     Color.Transparent,
                                     Color.Transparent,
-                                    Color.Black.copy(alpha = 0.65f)
+                                    Color.Black.copy(alpha = 0.85f)
                                 )
                             )
                         )
@@ -97,9 +97,8 @@ fun CineHubGridCard(
 
                 if (rating > 0) {
                     Surface(
-                        color = Color.Black.copy(alpha = 0.7f),
+                        color = Color.Black.copy(alpha = 0.75f),
                         shape = RoundedCornerShape(8.dp),
-                        border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.2f)),
                         modifier = Modifier
                             .padding(8.dp)
                             .align(Alignment.TopStart)
@@ -109,31 +108,20 @@ fun CineHubGridCard(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(3.dp)
                         ) {
-                            Text(
-                                text = "★",
-                                color = Color(0xFFFFD700),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = String.format("%.1f", rating),
-                                color = Color.White,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.ExtraBold
-                            )
+                            Text(text = "★", color = Color(0xFFFFD700), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text(text = String.format("%.1f", rating), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
                         }
                     }
                 }
 
-                // --- INLINE RESUME PROGRESS INDICATOR BAR ---
                 if (watchProgress > 0f) {
                     LinearProgressIndicator(
                         progress = { watchProgress },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(3.5.dp)
+                            .height(4.dp)
                             .align(Alignment.BottomCenter),
-                        color = MaterialTheme.colorScheme.error, // Streaming premium red bar tint
+                        color = MaterialTheme.colorScheme.primary,
                         trackColor = Color.White.copy(alpha = 0.35f)
                     )
                 }
@@ -142,15 +130,11 @@ fun CineHubGridCard(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 10.dp)
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
             ) {
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 14.sp,
-                        lineHeight = 18.sp
-                    ),
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.ExtraBold, fontSize = 14.sp, lineHeight = 18.sp),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.onSurface
@@ -158,10 +142,7 @@ fun CineHubGridCard(
                 
                 Text(
                     text = genre.ifEmpty { "Media Content" },
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        fontWeight = FontWeight.Medium,
-                        fontSize = 11.sp
-                    ),
+                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium, fontSize = 11.sp),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
