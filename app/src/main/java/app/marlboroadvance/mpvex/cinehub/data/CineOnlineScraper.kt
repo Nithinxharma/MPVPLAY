@@ -1,44 +1,107 @@
 package app.marlboroadvance.mpvex.cinehub.data
 
+import android.content.Context
+import app.marlboroadvance.mpvex.cinehub.model.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.io.File
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 @kotlinx.serialization.Serializable
 data class TMDBMovieNode(
+    val id: Int = 0,
     val title: String? = null, 
     val overview: String? = null, 
     val poster_path: String? = null, 
+    val backdrop_path: String? = null,
     val vote_average: Double = 0.0, 
     val release_date: String? = null
+)
+
+@kotlinx.serialization.Serializable
+data class TMDBTvNode(
+    val id: Int = 0,
+    val name: String? = null, 
+    val overview: String? = null, 
+    val poster_path: String? = null, 
+    val backdrop_path: String? = null,
+    val vote_average: Double = 0.0, 
+    val first_air_date: String? = null
+)
+
+@kotlinx.serialization.Serializable
+data class TMDBImage(val file_path: String, val iso_639_1: String? = null, val vote_average: Double = 0.0)
+
+@kotlinx.serialization.Serializable
+data class TMDBImagesResponse(val backdrops: List<TMDBImage> = emptyList(), val logos: List<TMDBImage> = emptyList(), val posters: List<TMDBImage> = emptyList())
+
+@kotlinx.serialization.Serializable
+data class TMDBCreditsResponse(val cast: List<TMDBCastNode> = emptyList(), val crew: List<TMDBCrewNode> = emptyList())
+
+@kotlinx.serialization.Serializable
+data class TMDBCastNode(val id: Int, val name: String, val character: String? = null, val profile_path: String? = null)
+
+@kotlinx.serialization.Serializable
+data class TMDBCrewNode(val id: Int, val name: String, val job: String? = null)
+
+@kotlinx.serialization.Serializable
+data class TMDBMovieDetails(
+    val id: Int,
+    val title: String,
+    val overview: String?,
+    val tagline: String?,
+    val runtime: Int?,
+    val release_date: String?,
+    val vote_average: Double,
+    val poster_path: String?,
+    val backdrop_path: String?,
+    val belongs_to_collection: TMDBCollectionNode?,
+    val imdb_id: String?,
+    val genres: List<TMDBGenre> = emptyList(),
+    val credits: TMDBCreditsResponse? = null,
+    val images: TMDBImagesResponse? = null
+)
+
+@kotlinx.serialization.Serializable
+data class TMDBGenre(val id: Int, val name: String)
+
+@kotlinx.serialization.Serializable
+data class TMDBCollectionNode(val id: Int, val name: String, val poster_path: String?, val backdrop_path: String?)
+
+@kotlinx.serialization.Serializable
+data class TMDBPersonDetails(
+    val id: Int,
+    val name: String,
+    val biography: String?,
+    val birthday: String?,
+    val profile_path: String?,
+    val known_for_department: String?
 )
 
 @kotlinx.serialization.Serializable
 data class TMDBMovieSearchWrapper(val results: List<TMDBMovieNode>)
 
 @kotlinx.serialization.Serializable
-data class TMDBTvNode(
-    val name: String? = null, 
-    val overview: String? = null, 
-    val poster_path: String? = null, 
-    val vote_average: Double = 0.0, 
-    val first_air_date: String? = null
-)
-
-@kotlinx.serialization.Serializable
 data class TMDBTvSearchWrapper(val results: List<TMDBTvNode>)
 
-// --- TVMAZE FALLBACK API NODE STRUCTURES ---
 @kotlinx.serialization.Serializable
 data class TVMazeShowNode(
+    val id: Int = 0,
     val name: String? = null,
     val summary: String? = null,
     val premiered: String? = null,
     val rating: TVMazeRating? = null,
-    val image: TVMazeImage? = null
+    val image: TVMazeImage? = null,
+    val externals: TVMazeExternals? = null
 )
+
+@kotlinx.serialization.Serializable
+data class TVMazeExternals(val thetvdb: Int? = null, val imdb: String? = null)
 
 @kotlinx.serialization.Serializable
 data class TVMazeRating(val average: Double? = null)
@@ -49,25 +112,55 @@ data class TVMazeImage(val original: String? = null, val medium: String? = null)
 @kotlinx.serialization.Serializable
 data class TVMazeSearchWrapper(val show: TVMazeShowNode? = null)
 
-data class OnlineMediaMetadata(
-    val title: String, 
-    val plot: String, 
-    val rating: Double, 
-    val posterPath: String?, 
-    val premiered: String
-)
+object MetadataCacheManager {
+    val jsonParser = Json { ignoreUnknownKeys = true; coerceInputValues = true }
+
+    fun getCacheDir(context: Context): File {
+        val dir = File(context.cacheDir, "cinehub_metadata")
+        if (!dir.exists()) dir.mkdirs()
+        return dir
+    }
+
+    inline fun <reified T> saveToCache(context: Context, id: String, data: T) {
+        try {
+            val file = File(getCacheDir(context), "${id.hashCode()}.json")
+            file.writeText(jsonParser.encodeToString(data))
+        } catch (e: Exception) {
+            android.util.Log.e("MetadataCache", "Failed to write cache for $id", e)
+        }
+    }
+
+    inline fun <reified T> loadFromCache(context: Context, id: String): T? {
+        try {
+            val file = File(getCacheDir(context), "${id.hashCode()}.json")
+            if (file.exists()) {
+                // Configurable expiry: currently defaults to permanent until user refreshes
+                return jsonParser.decodeFromString<T>(file.readText())
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("MetadataCache", "Failed to read cache for $id", e)
+        }
+        return null
+    }
+
+    fun clearCache(context: Context) {
+        getCacheDir(context).deleteRecursively()
+    }
+}
 
 object CineOnlineScraper {
     private val client = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
         .build()
 
     private val jsonParser = Json { ignoreUnknownKeys = true; coerceInputValues = true }
     
     private const val TMDB_BASE_URL = "https://api.themoviedb.org/3"
+    // Using standard free endpoint integration architecture
     private const val API_KEY = "38a73d59546aa8789c007d3dbd96cdbc"
-    private const val IMAGE_BASE_URL = "https://image.tmdb.org/t/p/w500"
+    const val IMAGE_BASE_URL = "https://image.tmdb.org/t/p/original"
+    const val THUMB_BASE_URL = "https://image.tmdb.org/t/p/w500"
     private const val TVMAZE_BASE_URL = "https://api.tvmaze.com"
 
     fun cleanMediaFileName(fileName: String): Pair<String, String?> {
@@ -86,110 +179,200 @@ object CineOnlineScraper {
         return Pair(cleanName, year)
     }
 
-    /**
-     * Searches TMDB with high density fallback queries
-     */
-    fun searchOnlineMovieMetadata(fileName: String): OnlineMediaMetadata? {
-        try {
-            val (cleanTitle, year) = cleanMediaFileName(fileName)
-            if (cleanTitle.isBlank()) return null
-            
-            val encodedTitle = URLEncoder.encode(cleanTitle, "UTF-8")
-            var url = "$TMDB_BASE_URL/search/movie?api_key=$API_KEY&query=$encodedTitle&language=en-US"
-            if (year != null) url += "&primary_release_year=$year"
+    suspend fun getOrFetchMovie(context: Context, fileName: String, fallbackTmdbId: String? = null, forceRefresh: Boolean = false): MovieItem? = withContext(Dispatchers.IO) {
+        val cacheId = fallbackTmdbId ?: fileName
+        
+        if (!forceRefresh) {
+            val cached = MetadataCacheManager.loadFromCache<MovieItem>(context, "movie_$cacheId")
+            if (cached != null) return@withContext cached
+        }
 
-            val request = Request.Builder().url(url).build()
-            client.newCall(request).execute().use { response ->
-                if (response.isSuccessful) {
-                    val body = response.body?.string() ?: return null
-                    val parsed = jsonParser.decodeFromString<TMDBMovieSearchWrapper>(body)
-                    val result = parsed.results.firstOrNull()
-                    if (result != null) {
-                        return OnlineMediaMetadata(
-                            title = result.title ?: cleanTitle,
-                            plot = result.overview?.ifBlank { "No plot summary available on TMDB index." } ?: "Overview missing.",
-                            rating = result.vote_average,
-                            posterPath = result.poster_path?.let { "$IMAGE_BASE_URL$it" },
-                            premiered = result.release_date ?: "2026"
+        try {
+            var tmdbId = fallbackTmdbId
+            val (cleanTitle, year) = cleanMediaFileName(fileName)
+
+            if (tmdbId.isNullOrBlank()) {
+                val encodedTitle = URLEncoder.encode(cleanTitle, "UTF-8")
+                var searchUrl = "$TMDB_BASE_URL/search/movie?api_key=$API_KEY&query=$encodedTitle&language=en-US"
+                if (year != null) searchUrl += "&primary_release_year=$year"
+
+                val searchReq = Request.Builder().url(searchUrl).build()
+                client.newCall(searchReq).execute().use { res ->
+                    if (res.isSuccessful) {
+                        val body = res.body?.string() ?: return@use
+                        val parsed = jsonParser.decodeFromString<TMDBMovieSearchWrapper>(body)
+                        tmdbId = parsed.results.firstOrNull()?.id?.toString()
+                    }
+                }
+            }
+
+            if (!tmdbId.isNullOrBlank()) {
+                val detailUrl = "$TMDB_BASE_URL/movie/$tmdbId?api_key=$API_KEY&append_to_response=credits,images&include_image_language=en,null"
+                val detailReq = Request.Builder().url(detailUrl).build()
+                
+                client.newCall(detailReq).execute().use { res ->
+                    if (res.isSuccessful) {
+                        val body = res.body?.string() ?: return@use
+                        val details = jsonParser.decodeFromString<TMDBMovieDetails>(body)
+                        
+                        val logoPath = details.images?.logos?.maxByOrNull { it.vote_average }?.file_path?.let { "$IMAGE_BASE_URL$it" }
+                        val director = details.credits?.crew?.firstOrNull { it.job == "Director" }?.name ?: "Unknown"
+                        
+                        val actors = details.credits?.cast?.take(15)?.map { cast ->
+                            ActorItem(
+                                id = cast.id.toString(),
+                                name = cast.name,
+                                character = cast.character ?: "",
+                                thumbUrl = cast.profile_path?.let { "$THUMB_BASE_URL$it" } ?: "https://ui-avatars.com/api/?name=${cast.name}&background=random"
+                            )
+                        } ?: emptyList()
+
+                        val collection = details.belongs_to_collection?.let {
+                            MediaCollection(
+                                id = it.id,
+                                name = it.name,
+                                posterPath = it.poster_path?.let { p -> "$IMAGE_BASE_URL$p" },
+                                backdropPath = it.backdrop_path?.let { b -> "$IMAGE_BASE_URL$b" }
+                            )
+                        }
+
+                        val movieItem = MovieItem(
+                            videoFilePath = "", // Replaced dynamically by scanner
+                            title = details.title,
+                            originalTitle = details.title,
+                            userRating = details.vote_average,
+                            plot = details.overview ?: "No description available.",
+                            tagline = details.tagline ?: "",
+                            mpaa = "",
+                            genre = details.genres.joinToString(", ") { it.name },
+                            director = director,
+                            premiered = details.release_date ?: "2026",
+                            runtime = details.runtime ?: 0,
+                            posterPath = details.poster_path?.let { "$IMAGE_BASE_URL$it" },
+                            backdropPath = details.backdrop_path?.let { "$IMAGE_BASE_URL$it" },
+                            logoPath = logoPath,
+                            tmdbId = tmdbId.toString(),
+                            imdbId = details.imdb_id ?: "",
+                            collection = collection,
+                            actors = actors,
+                            isMetadataCached = true
                         )
+                        
+                        MetadataCacheManager.saveToCache(context, "movie_$cacheId", movieItem)
+                        return@withContext movieItem
                     }
                 }
             }
         } catch (e: Exception) {
-            android.util.Log.w("CineOnlineScraper", "Movie primary online metadata scan failed: ${e.message}")
+            android.util.Log.e("CineOnlineScraper", "Online movie scan failed", e)
         }
-        return null
+        return@withContext null
     }
 
-    /**
-     * Upgraded Hybrid TV Engine: Scans TMDB first, and immediately cascades query tracking
-     * into TVMaze and TheTVDB Artwork CDN platforms if fields return unmapped layers.
-     */
-    fun searchOnlineTvMetadata(folderName: String): OnlineMediaMetadata? {
-        val (cleanTitle, year) = cleanMediaFileName(folderName)
-        if (cleanTitle.isBlank()) return null
+    suspend fun getOrFetchTvShow(context: Context, folderName: String, fallbackTmdbId: String? = null, forceRefresh: Boolean = false): TvShowItem? = withContext(Dispatchers.IO) {
+        val cacheId = fallbackTmdbId ?: folderName
+        
+        if (!forceRefresh) {
+            val cached = MetadataCacheManager.loadFromCache<TvShowItem>(context, "tv_$cacheId")
+            if (cached != null) return@withContext cached
+        }
 
-        // Pipeline Track 1: Search TMDB Engine
         try {
+            val (cleanTitle, year) = cleanMediaFileName(folderName)
             val encodedTitle = URLEncoder.encode(cleanTitle, "UTF-8")
-            var url = "$TMDB_BASE_URL/search/tv?api_key=$API_KEY&query=$encodedTitle&language=en-US"
-            if (year != null) url += "&first_air_date_year=$year"
+            
+            // TMDB Pipeline
+            var searchUrl = "$TMDB_BASE_URL/search/tv?api_key=$API_KEY&query=$encodedTitle&language=en-US"
+            if (year != null) searchUrl += "&first_air_date_year=$year"
 
-            val request = Request.Builder().url(url).build()
-            client.newCall(request).execute().use { response ->
-                if (response.isSuccessful) {
-                    val body = response.body?.string() ?: ""
+            val searchReq = Request.Builder().url(searchUrl).build()
+            client.newCall(searchReq).execute().use { res ->
+                if (res.isSuccessful) {
+                    val body = res.body?.string() ?: return@use
                     val parsed = jsonParser.decodeFromString<TMDBTvSearchWrapper>(body)
                     val result = parsed.results.firstOrNull()
+                    
                     if (result != null) {
-                        return OnlineMediaMetadata(
+                        val tvShow = TvShowItem(
+                            folderPath = "",
                             title = result.name ?: cleanTitle,
-                            plot = result.overview?.ifBlank { "No show description registered online." } ?: "Overview missing.",
-                            rating = result.vote_average,
+                            plot = result.overview ?: "No description.",
+                            userRating = result.vote_average,
+                            genre = "Series",
+                            premiered = result.first_air_date ?: "2026",
+                            studio = "Unknown",
                             posterPath = result.poster_path?.let { "$IMAGE_BASE_URL$it" },
-                            premiered = result.first_air_date ?: "2026"
+                            backdropPath = result.backdrop_path?.let { "$IMAGE_BASE_URL$it" },
+                            tmdbId = result.id.toString(),
+                            isMetadataCached = true
                         )
+                        MetadataCacheManager.saveToCache(context, "tv_$cacheId", tvShow)
+                        return@withContext tvShow
                     }
                 }
             }
-        } catch (_: Exception) {}
-
-        // Pipeline Track 2: Failover to TVMaze API (Excellent resolution layer for Indian content)
-        try {
-            val encodedTitle = URLEncoder.encode(cleanTitle, "UTF-8")
-            val tvMazeUrl = "$TVMAZE_BASE_URL/search/shows?q=$encodedTitle"
-            val request = Request.Builder().url(tvMazeUrl).build()
             
-            client.newCall(request).execute().use { response ->
+            // TVMaze Fallback
+            val tvMazeUrl = "$TVMAZE_BASE_URL/search/shows?q=$encodedTitle"
+            val reqMaze = Request.Builder().url(tvMazeUrl).build()
+            client.newCall(reqMaze).execute().use { response ->
                 if (response.isSuccessful) {
                     val body = response.body?.string() ?: ""
                     val array = jsonParser.decodeFromString<List<TVMazeSearchWrapper>>(body)
-                    val wrapper = array.firstOrNull()
-                    if (wrapper?.show != null) {
-                        val node = wrapper.show
-                        val cleanPlot = node.summary?.replace(Regex("<[^>]*>"), "") ?: "No description available."
-                        
-                        return OnlineMediaMetadata(
+                    val node = array.firstOrNull()?.show
+                    if (node != null) {
+                        val cleanPlot = node.summary?.replace(Regex("<[^>]*>"), "") ?: "No description."
+                        val tvShow = TvShowItem(
+                            folderPath = "",
                             title = node.name ?: cleanTitle,
                             plot = cleanPlot,
-                            rating = node.rating?.average ?: 7.8,
+                            userRating = node.rating?.average ?: 0.0,
+                            genre = "Series",
+                            premiered = node.premiered ?: "2026",
+                            studio = "Network",
                             posterPath = node.image?.original ?: node.image?.medium,
-                            premiered = node.premiered ?: "2026"
+                            tvdbId = node.externals?.thetvdb?.toString() ?: "",
+                            isMetadataCached = true
                         )
+                        MetadataCacheManager.saveToCache(context, "tv_$cacheId", tvShow)
+                        return@withContext tvShow
                     }
                 }
             }
-        } catch (e: Exception) {
-            android.util.Log.w("CineOnlineScraper", "TVMaze fallback bypass sequence timed out: ${e.message}")
-        }
+        } catch (e: Exception) {}
+        return@withContext null
+    }
 
-        // Pipeline Track 3: TheTVDB Structural Artwork CDN Resolution mapping fallback
-        return OnlineMediaMetadata(
-            title = cleanTitle,
-            plot = "Failproof network asset matched. Direct progressive multi-audio server configurations fully active.",
-            rating = 8.0,
-            posterPath = "https://artworks.thetvdb.com/banners/v4/series/461062/posters/69e33c246fb34.jpg",
-            premiered = year ?: "2026"
-        )
+    suspend fun fetchArtworkOptions(tmdbId: String, type: String = "movie"): TMDBImagesResponse? = withContext(Dispatchers.IO) {
+        try {
+            val url = "$TMDB_BASE_URL/$type/$tmdbId/images?api_key=$API_KEY&include_image_language=en,null"
+            val req = Request.Builder().url(url).build()
+            client.newCall(req).execute().use { res ->
+                if (res.isSuccessful) {
+                    val body = res.body?.string() ?: return@use null
+                    return@withContext jsonParser.decodeFromString<TMDBImagesResponse>(body)
+                }
+            }
+        } catch (e: Exception) {}
+        return@withContext null
+    }
+
+    suspend fun fetchActorDetails(context: Context, personId: String): TMDBPersonDetails? = withContext(Dispatchers.IO) {
+        val cached = MetadataCacheManager.loadFromCache<TMDBPersonDetails>(context, "actor_$personId")
+        if (cached != null) return@withContext cached
+
+        try {
+            val url = "$TMDB_BASE_URL/person/$personId?api_key=$API_KEY"
+            val req = Request.Builder().url(url).build()
+            client.newCall(req).execute().use { res ->
+                if (res.isSuccessful) {
+                    val body = res.body?.string() ?: return@use null
+                    val details = jsonParser.decodeFromString<TMDBPersonDetails>(body)
+                    MetadataCacheManager.saveToCache(context, "actor_$personId", details)
+                    return@withContext details
+                }
+            }
+        } catch (e: Exception) {}
+        return@withContext null
     }
 }

@@ -1,10 +1,14 @@
 package app.marlboroadvance.mpvex.cinehub.data
 
+import android.content.Context
 import android.util.Log
 import app.marlboroadvance.mpvex.cinehub.model.MovieItem
 import app.marlboroadvance.mpvex.cinehub.model.TvShowItem
 import app.marlboroadvance.mpvex.cinehub.model.EpisodeItem
 import app.marlboroadvance.mpvex.cinehub.model.ActorItem
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.w3c.dom.Document
 import org.w3c.dom.Element
 import org.w3c.dom.Node
@@ -30,10 +34,10 @@ object NfoScanner {
                standardizedPath.contains("/Cinerex/tvshows/", ignoreCase = true)
     }
 
-    // --- MOVIES SCANNING ENGINE ---
-    fun scanDirectoryForMovies(directory: File): List<MovieItem> {
+    // --- MOVIES HYBRID SCANNING ENGINE ---
+    suspend fun scanDirectoryForMovies(context: Context, directory: File): List<MovieItem> = withContext(Dispatchers.IO) {
         val movies = mutableListOf<MovieItem>()
-        if (!directory.exists() || !directory.isDirectory) return movies
+        if (!directory.exists() || !directory.isDirectory) return@withContext movies
 
         directory.listFiles()?.forEach { file ->
             if (file.isFile && isVideoFile(file)) {
@@ -41,40 +45,55 @@ object NfoScanner {
                     val specificNfo = File(directory, "${file.nameWithoutExtension}.nfo")
                     val genericNfo = File(directory, "movie.nfo")
                     val targetNfo = if (specificNfo.exists()) specificNfo else if (genericNfo.exists()) genericNfo else null
+                    
+                    var tmdbIdFallback: String? = null
+                    var nfoMovie: MovieItem? = null
 
                     if (targetNfo != null) {
-                        parseMovieNfo(targetNfo, file)?.let { movies.add(it) }
+                        nfoMovie = parseMovieNfo(targetNfo, file)
+                        tmdbIdFallback = nfoMovie?.tmdbId?.takeIf { it.isNotBlank() }
+                    }
+
+                    // 1. Prioritize Cloud/Cache Layer
+                    val onlineMeta = CineOnlineScraper.getOrFetchMovie(context, file.name, tmdbIdFallback)
+                    
+                    if (onlineMeta != null) {
+                        // Merge essential local paths while retaining premium cloud metadata
+                        movies.add(onlineMeta.copy(
+                            videoFilePath = file.absolutePath,
+                            posterPath = onlineMeta.posterPath ?: nfoMovie?.posterPath, // Retain local artwork if cloud fails
+                            backdropPath = onlineMeta.backdropPath ?: resolveArtworkLocalFallback(file.parentFile, "fanart.jpg")
+                        ))
+                    } else if (nfoMovie != null) {
+                        // 2. Fallback strictly to complete NFO data if totally offline
+                        movies.add(nfoMovie)
                     } else {
-                        val onlineMeta = CineOnlineScraper.searchOnlineMovieMetadata(file.name)
-                        movies.add(
-                            MovieItem(
-                                videoFilePath = file.absolutePath,
-                                title = onlineMeta?.title ?: file.nameWithoutExtension,
-                                originalTitle = "",
-                                userRating = onlineMeta?.rating ?: 0.0,
-                                plot = onlineMeta?.plot ?: "No local or online description available.",
-                                mpaa = "",
-                                genre = "Local Movie",
-                                director = "Unknown",
-                                premiered = onlineMeta?.premiered ?: "2026",
-                                posterPath = onlineMeta?.posterPath,
-                                watchProgress = 0f,
-                                actors = emptyList()
-                            )
-                        )
+                        // 3. Absolute barebones fallback
+                        movies.add(MovieItem(
+                            videoFilePath = file.absolutePath,
+                            title = file.nameWithoutExtension,
+                            originalTitle = "",
+                            userRating = 0.0,
+                            plot = "No local NFO or online metadata found.",
+                            mpaa = "",
+                            genre = "Local Movie",
+                            director = "Unknown",
+                            premiered = "2026",
+                            posterPath = resolveArtworkLocalFallback(file.parentFile, "poster.jpg")
+                        ))
                     }
                 }
             } else if (file.isDirectory) {
-                movies.addAll(scanDirectoryForMovies(file))
+                movies.addAll(scanDirectoryForMovies(context, file))
             }
         }
-        return movies
+        return@withContext movies
     }
 
-    // --- TV SHOWS SCANNING ENGINE ---
-    fun scanDirectoryForTvShows(directory: File): List<TvShowItem> {
+    // --- TV SHOWS HYBRID SCANNING ENGINE ---
+    suspend fun scanDirectoryForTvShows(context: Context, directory: File): List<TvShowItem> = withContext(Dispatchers.IO) {
         val tvShows = mutableListOf<TvShowItem>()
-        if (!directory.exists() || !directory.isDirectory) return tvShows
+        if (!directory.exists() || !directory.isDirectory) return@withContext tvShows
 
         if (isStrictTvShowPath(directory.absolutePath)) {
             val tvShowNfo = File(directory, "tvshow.nfo")
@@ -82,37 +101,47 @@ object NfoScanner {
             val isMainShowFolder = parentFolderName.equals("tvshows", ignoreCase = true)
 
             if (isMainShowFolder) {
+                var tmdbIdFallback: String? = null
+                var nfoShow: TvShowItem? = null
+
                 if (tvShowNfo.exists()) {
-                    parseTvShowNfo(tvShowNfo, directory)?.let { tvShows.add(it) }
+                    nfoShow = parseTvShowNfo(tvShowNfo, directory)
+                    tmdbIdFallback = nfoShow?.tmdbId?.takeIf { it.isNotBlank() }
+                }
+
+                val onlineMeta = CineOnlineScraper.getOrFetchTvShow(context, directory.name, tmdbIdFallback)
+
+                if (onlineMeta != null) {
+                    tvShows.add(onlineMeta.copy(
+                        folderPath = directory.absolutePath,
+                        posterPath = onlineMeta.posterPath ?: nfoShow?.posterPath,
+                        backdropPath = onlineMeta.backdropPath ?: resolveArtworkLocalFallback(directory, "fanart.jpg")
+                    ))
+                } else if (nfoShow != null) {
+                    tvShows.add(nfoShow)
                 } else {
-                    val onlineMeta = CineOnlineScraper.searchOnlineTvMetadata(directory.name)
-                    tvShows.add(
-                        TvShowItem(
-                            folderPath = directory.absolutePath,
-                            title = onlineMeta?.title ?: directory.name,
-                            plot = "No description available.",
-                            userRating = 0.0,
-                            genre = "Local Series",
-                            premiered = "2026",
-                            studio = "Unknown",
-                            posterPath = null,
-                            watchProgress = 0f,
-                            actors = emptyList()
-                        )
-                    )
+                    tvShows.add(TvShowItem(
+                        folderPath = directory.absolutePath,
+                        title = directory.name,
+                        plot = "No description available.",
+                        userRating = 0.0,
+                        genre = "Local Series",
+                        premiered = "2026",
+                        studio = "Unknown",
+                        posterPath = resolveArtworkLocalFallback(directory, "poster.jpg")
+                    ))
                 }
             }
         }
 
         directory.listFiles()?.forEach { file ->
             if (file.isDirectory) {
-                tvShows.addAll(scanDirectoryForTvShows(file))
+                tvShows.addAll(scanDirectoryForTvShows(context, file))
             }
         }
-        return tvShows
+        return@withContext tvShows
     }
 
-    // --- TV EPISODES COLLECTION ROUTER ---
     fun scanTvShowEpisodes(showFolder: File): List<EpisodeItem> {
         val episodes = mutableListOf<EpisodeItem>()
         if (!showFolder.exists() || !showFolder.isDirectory) return episodes
@@ -129,10 +158,9 @@ object NfoScanner {
                             title = file.nameWithoutExtension,
                             season = extractSeasonNumber(showFolder.name),
                             episode = extractEpisodeNumber(file.name),
-                            plot = "Local Media File. Multi-source scraping pipeline links active.",
+                            plot = "Local Media File.",
                             userRating = 0.0,
-                            aired = "2026",
-                            watchProgress = 0f
+                            aired = "2026"
                         )
                     )
                 }
@@ -162,26 +190,20 @@ object NfoScanner {
 
             val root = doc.documentElement
             val title = getTagText(root, "title").ifBlank { videoFile.nameWithoutExtension }
-            val originalTitle = getTagText(root, "originaltitle")
-            val userRating = getTagText(root, "userrating").toDoubleOrNull() ?: 0.0
-            val plot = getTagText(root, "plot").ifBlank { "No description available." }
-            val mpaa = getTagText(root, "mpaa")
-            val genre = getTagText(root, "genre").ifBlank { "Local Movie" }
-            val director = getTagText(root, "director").ifBlank { "Unknown" }
-            val premiered = getTagText(root, "premiered").ifBlank { getTagText(root, "year").ifBlank { "2026" } }
-
+            
             MovieItem(
                 videoFilePath = videoFile.absolutePath,
                 title = title,
-                originalTitle = originalTitle,
-                userRating = userRating,
-                plot = plot,
-                mpaa = mpaa,
-                genre = genre,
-                director = director,
-                premiered = premiered,
+                originalTitle = getTagText(root, "originaltitle"),
+                userRating = getTagText(root, "userrating").toDoubleOrNull() ?: 0.0,
+                plot = getTagText(root, "plot").ifBlank { "No description available." },
+                mpaa = getTagText(root, "mpaa"),
+                genre = getTagText(root, "genre").ifBlank { "Local Movie" },
+                director = getTagText(root, "director").ifBlank { "Unknown" },
+                premiered = getTagText(root, "premiered").ifBlank { getTagText(root, "year").ifBlank { "2026" } },
+                tmdbId = getTagText(root, "tmdbid"),
+                imdbId = getTagText(root, "imdbid"),
                 posterPath = resolvePosterWithFallback(nfoFile, root),
-                watchProgress = 0f, // Track status bypassed to native MPVrex player cache engine
                 actors = parseActorsFromNfo(doc)
             )
         } catch (e: Exception) {
@@ -197,22 +219,18 @@ object NfoScanner {
 
             val root = doc.documentElement
             val title = getTagText(root, "title").ifBlank { folder.name }
-            val plot = getTagText(root, "plot").ifBlank { "No description available." }
-            val userRating = getTagText(root, "userrating").toDoubleOrNull() ?: 0.0
-            val genre = getTagText(root, "genre").ifBlank { "Local Series" }
-            val premiered = getTagText(root, "premiered").ifBlank { getTagText(root, "year").ifBlank { "2026" } }
-            val studio = getTagText(root, "studio").ifBlank { "Unknown" }
-
+            
             TvShowItem(
                 folderPath = folder.absolutePath,
                 title = title,
-                plot = plot,
-                userRating = userRating,
-                genre = genre,
-                premiered = premiered,
-                studio = studio,
+                plot = getTagText(root, "plot").ifBlank { "No description available." },
+                userRating = getTagText(root, "userrating").toDoubleOrNull() ?: 0.0,
+                genre = getTagText(root, "genre").ifBlank { "Local Series" },
+                premiered = getTagText(root, "premiered").ifBlank { getTagText(root, "year").ifBlank { "2026" } },
+                studio = getTagText(root, "studio").ifBlank { "Unknown" },
+                tmdbId = getTagText(root, "tmdbid"),
+                tvdbId = getTagText(root, "tvdbid"),
                 posterPath = resolvePosterWithFallback(nfoFile, root),
-                watchProgress = 0f, // Track status bypassed to native MPVrex player cache engine
                 actors = parseActorsFromNfo(doc)
             )
         } catch (e: Exception) {
@@ -227,25 +245,16 @@ object NfoScanner {
             if (doc.documentElement.nodeName != "episodedetails") return null
 
             val root = doc.documentElement
-            val title = getTagText(root, "title").ifBlank { videoFile.nameWithoutExtension }
-            val season = getTagText(root, "season").toIntOrNull() ?: 1
-            val episode = getTagText(root, "episode").toIntOrNull() ?: 1
-            val plot = getTagText(root, "plot")
-            val userRating = getTagText(root, "userrating").toDoubleOrNull() ?: 0.0
-            val aired = getTagText(root, "aired")
-
             EpisodeItem(
                 videoFilePath = videoFile.absolutePath,
-                title = title,
-                season = season,
-                episode = episode,
-                plot = plot,
-                userRating = userRating,
-                aired = aired,
-                watchProgress = 0f // Bypassed to native MPVrex engine
+                title = getTagText(root, "title").ifBlank { videoFile.nameWithoutExtension },
+                season = getTagText(root, "season").toIntOrNull() ?: 1,
+                episode = getTagText(root, "episode").toIntOrNull() ?: 1,
+                plot = getTagText(root, "plot"),
+                userRating = getTagText(root, "userrating").toDoubleOrNull() ?: 0.0,
+                aired = getTagText(root, "aired")
             )
         } catch (e: Exception) {
-            Log.e("CineHubScanner", "Error processing episode XML: ${nfoFile.name}", e)
             null
         }
     }
@@ -268,14 +277,19 @@ object NfoScanner {
         return ""
     }
 
+    private fun resolveArtworkLocalFallback(parentDir: File?, targetName: String): String? {
+        if (parentDir == null) return null
+        return File(parentDir, targetName).takeIf { it.exists() }?.absolutePath
+    }
+
     private fun resolvePosterWithFallback(nfoFile: File, rootElement: Element): String? {
         val baseName = nfoFile.nameWithoutExtension
         val parentDir = nfoFile.parentFile
 
-        val localCheck = File(parentDir, "$baseName.jpg").takeIf { it.exists() }?.absolutePath
-            ?: File(parentDir, "$baseName.png").takeIf { it.exists() }?.absolutePath
-            ?: File(parentDir, "poster.jpg").takeIf { it.exists() }?.absolutePath
-            ?: File(parentDir, "folder.jpg").takeIf { it.exists() }?.absolutePath
+        val localCheck = resolveArtworkLocalFallback(parentDir, "$baseName.jpg")
+            ?: resolveArtworkLocalFallback(parentDir, "poster.jpg")
+            ?: resolveArtworkLocalFallback(parentDir, "folder.jpg")
+            
         if (localCheck != null) return localCheck
 
         val thumbList = rootElement.getElementsByTagName("thumb")
@@ -290,18 +304,9 @@ object NfoScanner {
                 }
             }
         }
-
-        if (thumbList.length > 0) {
-            val firstUrl = thumbList.item(0)?.textContent?.trim() ?: ""
-            if (firstUrl.startsWith("http")) return firstUrl
-        }
-
         return null
     }
 
-    /**
-     * Standardized Actor Data Parser that extracts raw XML blocks cleanly into type-safe collections
-     */
     fun parseActorsFromNfo(doc: Document): List<ActorItem> {
         val actorsList = mutableListOf<ActorItem>()
         try {
@@ -312,8 +317,9 @@ object NfoScanner {
                     val element = node as Element
                     val name = getTagText(element, "name")
                     val thumb = getTagText(element, "thumb")
+                    val role = getTagText(element, "role")
                     if (name.isNotBlank()) {
-                        actorsList.add(ActorItem(name = name, thumbUrl = thumb))
+                        actorsList.add(ActorItem(name = name, thumbUrl = thumb, character = role))
                     }
                 }
             }
@@ -321,9 +327,6 @@ object NfoScanner {
         return actorsList
     }
 
-    /**
-     * Cross-checks directories to return clear matching nodes where specific actor is standard across entities
-     */
     fun getSharedFilmography(actorName: String, movies: List<MovieItem>, shows: List<TvShowItem>): Pair<List<MovieItem>, List<TvShowItem>> {
         val matchMovies = movies.filter { movie -> movie.actors.any { it.name.equals(actorName, ignoreCase = true) } }
         val matchShows = shows.filter { show -> show.actors.any { it.name.equals(actorName, ignoreCase = true) } }

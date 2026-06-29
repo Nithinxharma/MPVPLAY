@@ -26,27 +26,7 @@ object CineCloudRepoClient {
         "aHR0cHM6Ly9tb2JpbGVkZXRlY3RzLmNvbQ==",
         "aHR0cHM6Ly9tb2JpbGVkZXRlY3QuYXBw",
         "aHR0cHM6Ly9tb2JpZGV0ZWN0LmFydA==",
-        "aHR0cHM6Ly9tb2JpZGV0ZWN0LmNj",
-        "aHR0cHM6Ly9tb2JpZGV0ZWN0LmNsaWNr",
-        "aHR0cHM6Ly9tb2JpZGV0ZWN0Lmluaw==",
-        "aHR0cHM6Ly9tb2JpZGV0ZWN0LmxpdmU=",
-        "aHR0cHM6Ly9tb2JpZGV0ZWN0LnBybw==",
-        "aHR0cHM6Ly9tb2JpZGV0ZWN0LnNob3A=",
-        "aHR0cHM6Ly9tb2JpZGV0ZWN0LnNpdGU=",
-        "aHR0cHM6Ly9tb2JpZGV0ZWN0LnNwYWNl",
-        "aHR0cHM6Ly9tb2JpZGV0ZWN0LnN0b3Jl",
-        "aHR0cHM6Ly9tb2JpZGV0ZWN0LnZpcA==",
-        "aHR0cHM6Ly9tb2JpZGV0ZWN0Lndpa2k=",
-        "aHR0cHM6Ly9tb2JpZGV0ZWN0Lnh5eg==",
-        "aHR0cHM6Ly9tb2JpZGV0ZWN0cy5hcnQ=",
-        "aHR0cHM6Ly9tb2JpZGV0ZWN0cy5jYw==",
-        "aHR0cHM6Ly9tb2JpZGV0ZWN0cy5pbmZv",
-        "aHR0cHM6Ly9tb2JpZGV0ZWN0cy5pbms=",
-        "aHR0cHM6Ly9tb2JpZGV0ZWN0cy5saXZl",
-        "aHR0cHM6Ly9tb2JpZGV0ZWN0cy5wcm8=",
-        "aHR0cHM6Ly9tb2JpZGV0ZWN0cy5zdG9yZQ==",
-        "aHR0cHM6Ly9tb2JpZGV0ZWN0cy50b3A=",
-        "aHR0cHM6Ly9tb2JpZGV0ZWN0cy54eXo="
+        "aHR0cHM6Ly9tb2JpZGV0ZWN0LmNj"
     )
 
     @Volatile private var workingDomain: String = "https://net52.cc"
@@ -149,9 +129,7 @@ object CineCloudRepoClient {
                         .apply()
                 }
             }
-        } catch (e: Exception) {
-            android.util.Log.e("CineCloudRepo", "Session bypass failure: " + e.message)
-        }
+        } catch (e: Exception) { }
     }
 
     private fun parseHtmlToItems(html: String, targetPlatform: String): List<Any> {
@@ -174,7 +152,7 @@ object CineCloudRepoClient {
                         TvShowItem(
                             folderPath = "cnc_tv:$id:$targetPlatform",
                             title = title,
-                            plot = "Premium multi-language series catalog. Direct high-speed video synchronization loop verified.",
+                            plot = "Premium multi-language series catalog.",
                             userRating = 8.5,
                             genre = if (targetPlatform == "hs") "Hotstar Release" else "Disney+ Original",
                             premiered = "2026",
@@ -187,9 +165,9 @@ object CineCloudRepoClient {
                         MovieItem(
                             videoFilePath = "cnc_stream:$id:$targetPlatform",
                             title = title,
-                            originalTitle = if (targetPlatform == "nf") "Netflix" else "Prime Video",
+                            originalTitle = "",
                             userRating = 8.3,
-                            plot = "Premium cloud blockbuster stream release block active. Multi-language audio enabled.",
+                            plot = "Premium cloud blockbuster stream release block active.",
                             mpaa = "UA",
                             genre = if (targetPlatform == "nf") "Netflix Hit" else "Prime Video Hit",
                             director = "CNCVerse",
@@ -203,36 +181,15 @@ object CineCloudRepoClient {
         return extractedItems
     }
 
-    private suspend fun fetchPlatformRawHtml(context: Context, ottCode: String): String {
-        ensureValidSession(context)
-        val prefs = context.getSharedPreferences("NetflixMirrorPrefs", Context.MODE_PRIVATE)
-        val activeSessionCookie = prefs.getString("nf_cookie", "") ?: ""
-
-        val requestBuilder = Request.Builder().url("$workingDomain/mobile/home?app=1")
-        standardHeaders.forEach { (key, value) -> requestBuilder.addHeader(key, value) }
-        requestBuilder.addHeader("Cookie", "t_hash_t=$activeSessionCookie; hd=on; ott=$ottCode")
-        
-        return try {
-            client.newCall(requestBuilder.build()).execute().use { r ->
-                if (r.isSuccessful) r.body?.string() ?: "" else ""
-            }
-        } catch (e: Exception) { "" }
-    }
-
     private fun generateVidSrcMovieFallback(): List<MovieItem> {
         return listOf(
-            MovieItem("vidsrc_movie:tt15354916:vidsrc", "Jawan", "IMDB: tt15354916", 8.0, "Failproof secondary cloud core backup cluster active.", "UA", "Action", "Indian Cinema", "2023", "https://image.tmdb.org/t/p/w500/z0g27g67g09uS7wA7R24gvewOAn.jpg"),
-            MovieItem("vidsrc_movie:tt23812450:vidsrc", "Salaar: Part 1 - Ceasefire", "IMDB: tt23812450", 8.2, "Failproof secondary cloud core backup cluster active.", "UA", "Action Thriller", "Indian Cinema", "2023", "https://image.tmdb.org/t/p/w500/9S7mAL8LPrE7idp6968mYI686No.jpg"),
-            MovieItem("vidsrc_movie:tt12037194:vidsrc", "Animal", "IMDB: tt12037194", 7.8, "Failproof secondary cloud core backup cluster active.", "A", "Crime Drama", "Indian Cinema", "2023", "https://image.tmdb.org/t/p/w500/hr9reBw6gK74g66g8fA9ZtXqW6N.jpg"),
-            MovieItem("vidsrc_movie:tt21064584:vidsrc", "Dunki", "IMDB: tt21064584", 7.5, "Failproof secondary cloud core backup cluster active.", "UA", "Comedy Drama", "Indian Cinema", "2023", "https://image.tmdb.org/t/p/w500/60vGfX99Zf3D1S178vOAt867R2k.jpg")
+            MovieItem("vidsrc_movie:tt15354916:vidsrc", "Jawan", "", 8.0, "Failproof secondary cloud backup.", "UA", "Action", "Atlee", "2023", "https://image.tmdb.org/t/p/w500/z0g27g67g09uS7wA7R24gvewOAn.jpg")
         )
     }
 
     private fun generateVidSrcTvFallback(): List<TvShowItem> {
         return listOf(
-            TvShowItem("vidsrc_tv:tt14674744:vidsrc", "Mirzapur", "Failproof secondary cloud core series backup cluster active.", 8.5, "Crime Drama", "2018", "Amazon Prime", "https://image.tmdb.org/t/p/w500/7Z9RE6g68R76A9ZtxqW8fMo4wNz.jpg"),
-            TvShowItem("vidsrc_tv:tt13623148:vidsrc", "The Family Man", "Failproof secondary cloud core series backup cluster active.", 8.7, "Action Thriller", "2019", "Amazon Prime", "https://image.tmdb.org/t/p/w500/w9VwX7G8R8Z8g6y7FwLAt8No3gM.jpg"),
-            TvShowItem("vidsrc_tv:tt12683054:vidsrc", "Panchayat", "Failproof secondary cloud core series backup cluster active.", 8.9, "Comedy Drama", "2020", "TVF Play", "https://image.tmdb.org/t/p/w500/9S76gK8RPrA8X7vW6LAt9No4g9z.jpg")
+            TvShowItem("vidsrc_tv:tt14674744:vidsrc", "Mirzapur", "Failproof secondary cloud backup.", 8.5, "Crime Drama", "2018", "Amazon", "https://image.tmdb.org/t/p/w500/7Z9RE6g68R76A9ZtxqW8fMo4wNz.jpg")
         )
     }
 
@@ -268,6 +225,22 @@ object CineCloudRepoClient {
         return@withContext aggregatedTv.distinctBy { it.folderPath }.take(24)
     }
 
+    private suspend fun fetchPlatformRawHtml(context: Context, ottCode: String): String {
+        ensureValidSession(context)
+        val prefs = context.getSharedPreferences("NetflixMirrorPrefs", Context.MODE_PRIVATE)
+        val activeSessionCookie = prefs.getString("nf_cookie", "") ?: ""
+
+        val requestBuilder = Request.Builder().url("$workingDomain/mobile/home?app=1")
+        standardHeaders.forEach { (key, value) -> requestBuilder.addHeader(key, value) }
+        requestBuilder.addHeader("Cookie", "t_hash_t=$activeSessionCookie; hd=on; ott=$ottCode")
+        
+        return try {
+            client.newCall(requestBuilder.build()).execute().use { r ->
+                if (r.isSuccessful) r.body?.string() ?: "" else ""
+            }
+        } catch (e: Exception) { "" }
+    }
+
     suspend fun resolveDirectStreamUrl(postId: String, platformCode: String): String? = withContext(Dispatchers.IO) {
         if (platformCode.equals("vidsrc", ignoreCase = true)) {
             if (postId.startsWith("tt")) {
@@ -296,9 +269,7 @@ object CineCloudRepoClient {
                     }
                 }
             }
-        } catch (e: Exception) {
-            android.util.Log.e("CineCloudRepo", "Decryption trace failure: " + e.message)
-        }
+        } catch (e: Exception) { }
         return@withContext null
     }
 }
