@@ -30,7 +30,6 @@ object NfoScanner {
                standardizedPath.contains("/Cinerex/tvshows/", ignoreCase = true)
     }
 
-    // --- SYNCHRONOUS LOCAL DISK SCANNER ---
     fun scanDirectoryForMovies(directory: File): List<MovieItem> {
         val movies = mutableListOf<MovieItem>()
         if (!directory.exists() || !directory.isDirectory) return movies
@@ -42,9 +41,16 @@ object NfoScanner {
                     val genericNfo = File(directory, "movie.nfo")
                     val targetNfo = if (specificNfo.exists()) specificNfo else if (genericNfo.exists()) genericNfo else null
                     
+                    var movieParsed = false
                     if (targetNfo != null) {
-                        parseMovieNfo(targetNfo, file)?.let { movies.add(it) }
-                    } else {
+                        val parsed = parseMovieNfo(targetNfo, file)
+                        if (parsed != null) {
+                            movies.add(parsed)
+                            movieParsed = true
+                        }
+                    } 
+                    
+                    if (!movieParsed) {
                         movies.add(
                             MovieItem(
                                 videoFilePath = file.absolutePath,
@@ -69,7 +75,6 @@ object NfoScanner {
         return movies
     }
 
-    // --- SYNCHRONOUS TV SHOW SCANNER ---
     fun scanDirectoryForTvShows(directory: File): List<TvShowItem> {
         val tvShows = mutableListOf<TvShowItem>()
         if (!directory.exists() || !directory.isDirectory) return tvShows
@@ -80,9 +85,16 @@ object NfoScanner {
             val isMainShowFolder = parentFolderName.equals("tvshows", ignoreCase = true)
 
             if (isMainShowFolder) {
+                var showParsed = false
                 if (tvShowNfo.exists()) {
-                    parseTvShowNfo(tvShowNfo, directory)?.let { tvShows.add(it) }
-                } else {
+                    val parsed = parseTvShowNfo(tvShowNfo, directory)
+                    if (parsed != null) {
+                        tvShows.add(parsed)
+                        showParsed = true
+                    }
+                } 
+                
+                if (!showParsed) {
                     tvShows.add(
                         TvShowItem(
                             folderPath = directory.absolutePath,
@@ -115,13 +127,24 @@ object NfoScanner {
         showFolder.listFiles()?.forEach { file ->
             if (file.isFile && isVideoFile(file)) {
                 val nfoFile = File(showFolder, "${file.nameWithoutExtension}.nfo")
+                var parsedEpisode: EpisodeItem? = null
+                
                 if (nfoFile.exists()) {
-                    parseEpisodeNfo(nfoFile, file)?.let { episodes.add(it) }
+                    parsedEpisode = parseEpisodeNfo(nfoFile, file)
+                }
+                
+                if (parsedEpisode != null) {
+                    episodes.add(parsedEpisode)
                 } else {
+                    // Critical Fallback: Prevents invisible episodes if .nfo is purely ASCII text.
+                    val cleanedTitle = file.nameWithoutExtension
+                        .replace(Regex("(?i)\\b(1080p|720p|480p|x264|x265|hevc|10bit|dual|audio|hindi|english|korean|msubs|esubs|moviesmod|org|army)\\b.*"), "")
+                        .replace(Regex("[\\.\\-_]"), " ").trim()
+
                     episodes.add(
                         EpisodeItem(
                             videoFilePath = file.absolutePath,
-                            title = file.nameWithoutExtension,
+                            title = cleanedTitle,
                             season = extractSeasonNumber(showFolder.name),
                             episode = extractEpisodeNumber(file.name),
                             plot = "Local Media File.",

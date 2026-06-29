@@ -171,22 +171,30 @@ object CineOnlineScraper {
     private const val TVMAZE_BASE_URL = "https://api.tvmaze.com"
 
     fun cleanMediaFileName(fileName: String): Pair<String, String?> {
+        // Strip base file extension
         var cleanName = fileName.replace(Regex("(?i)\\.(mp4|mkv|avi|mov|webm|flv|ts)\$"), "")
-            .replace(Regex("[\\.\\-_]"), " ")
 
+        // Mass strip scene release tags to prevent online lookup failure
+        cleanName = cleanName.replace(Regex("(?i)\\b(1080p|720p|480p|2160p|4k|bluray|web-dl|webrip|hdrip|x264|x265|hevc|10bit|dual|audio|hindi|english|korean|msubs|esubs|moviesmod|org|army|episode\\s*\\d+|season\\s*\\d+|s\\d+e\\d+)\\b.*"), "")
+
+        // Clean dots and underscores
+        cleanName = cleanName.replace(Regex("[\\.\\-_]"), " ")
+
+        // Extract year 
         val yearRegex = Regex("\\b(19|20)\\d{2}\\b")
         val match = yearRegex.find(cleanName)
         val year = match?.value
 
-        if (year != null) {
-            cleanName = cleanName.substring(0, match.range.first).trim()
+        if (match != null) {
+            cleanName = cleanName.substring(0, match.range.first)
         }
         
-        cleanName = cleanName.replace(Regex("(?i)\\b(1080p|720p|2160p|4k|bluray|webrip|hdrip|x264|x265|h264|h265|dual|audio|hindi|english|season\\s*\\d+|s\\d+e\\d+)\\b.*"), "").trim()
+        // Remove trailing brackets or parentheses
+        cleanName = cleanName.replace(Regex("[\\[\\]\\(\\)]"), " ").replace(Regex("\\s+"), " ").trim()
+
         return Pair(cleanName, year)
     }
 
-    // --- RESTORED SYNCHRONOUS HOOKS FOR LOCAL SCANNER COMPATIBILITY ---
     fun searchOnlineMovieMetadata(fileName: String): OnlineMediaMetadata? {
         return runBlocking {
             val movie = getOrFetchMovie(null, fileName, null, false)
@@ -217,7 +225,6 @@ object CineOnlineScraper {
         }
     }
 
-    // --- ASYNC HIGH-PERFORMANCE DATA PIPELINES ---
     suspend fun getOrFetchMovie(context: Context?, fileName: String, fallbackTmdbId: String? = null, forceRefresh: Boolean = false): MovieItem? = withContext(Dispatchers.IO) {
         val cacheId = fallbackTmdbId ?: fileName
         
