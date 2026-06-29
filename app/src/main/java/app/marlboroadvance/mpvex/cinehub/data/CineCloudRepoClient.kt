@@ -168,10 +168,12 @@ object CineCloudRepoClient {
                             originalTitle = "",
                             userRating = 8.3,
                             plot = "Premium cloud blockbuster stream release block active.",
+                            tagline = "",
                             mpaa = "UA",
                             genre = if (targetPlatform == "nf") "Netflix Hit" else "Prime Video Hit",
                             director = "CNCVerse",
                             premiered = "2026",
+                            runtime = 0,
                             posterPath = if (targetPlatform == "nf") "https://imgcdn.kim/poster/v/$id.jpg" else "https://imgcdn.kim/pv/v/$id.jpg"
                         )
                     )
@@ -183,13 +185,35 @@ object CineCloudRepoClient {
 
     private fun generateVidSrcMovieFallback(): List<MovieItem> {
         return listOf(
-            MovieItem("vidsrc_movie:tt15354916:vidsrc", "Jawan", "", 8.0, "Failproof secondary cloud backup.", "UA", "Action", "Atlee", "2023", "https://image.tmdb.org/t/p/w500/z0g27g67g09uS7wA7R24gvewOAn.jpg")
+            MovieItem(
+                videoFilePath = "vidsrc_movie:tt15354916:vidsrc",
+                title = "Jawan",
+                originalTitle = "",
+                userRating = 8.0,
+                plot = "Failproof secondary cloud backup.",
+                tagline = "",
+                mpaa = "UA",
+                genre = "Action",
+                director = "Atlee",
+                premiered = "2023",
+                runtime = 169,
+                posterPath = "https://image.tmdb.org/t/p/w500/z0g27g67g09uS7wA7R24gvewOAn.jpg"
+            )
         )
     }
 
     private fun generateVidSrcTvFallback(): List<TvShowItem> {
         return listOf(
-            TvShowItem("vidsrc_tv:tt14674744:vidsrc", "Mirzapur", "Failproof secondary cloud backup.", 8.5, "Crime Drama", "2018", "Amazon", "https://image.tmdb.org/t/p/w500/7Z9RE6g68R76A9ZtxqW8fMo4wNz.jpg")
+            TvShowItem(
+                folderPath = "vidsrc_tv:tt14674744:vidsrc",
+                title = "Mirzapur",
+                plot = "Failproof secondary cloud backup.",
+                userRating = 8.5,
+                genre = "Crime Drama",
+                premiered = "2018",
+                studio = "Amazon",
+                posterPath = "https://image.tmdb.org/t/p/w500/7Z9RE6g68R76A9ZtxqW8fMo4wNz.jpg"
+            )
         )
     }
 
