@@ -3,6 +3,7 @@ package app.marlboroadvance.mpvex.cinehub.data
 import android.content.Context
 import app.marlboroadvance.mpvex.cinehub.model.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -112,6 +113,14 @@ data class TVMazeImage(val original: String? = null, val medium: String? = null)
 @kotlinx.serialization.Serializable
 data class TVMazeSearchWrapper(val show: TVMazeShowNode? = null)
 
+data class OnlineMediaMetadata(
+    val title: String, 
+    val plot: String, 
+    val rating: Double, 
+    val posterPath: String?, 
+    val premiered: String
+)
+
 object MetadataCacheManager {
     val jsonParser = Json { ignoreUnknownKeys = true; coerceInputValues = true }
 
@@ -134,7 +143,6 @@ object MetadataCacheManager {
         try {
             val file = File(getCacheDir(context), "${id.hashCode()}.json")
             if (file.exists()) {
-                // Configurable expiry: currently defaults to permanent until user refreshes
                 return jsonParser.decodeFromString<T>(file.readText())
             }
         } catch (e: Exception) {
@@ -157,7 +165,6 @@ object CineOnlineScraper {
     private val jsonParser = Json { ignoreUnknownKeys = true; coerceInputValues = true }
     
     private const val TMDB_BASE_URL = "https://api.themoviedb.org/3"
-    // Using standard free endpoint integration architecture
     private const val API_KEY = "38a73d59546aa8789c007d3dbd96cdbc"
     const val IMAGE_BASE_URL = "https://image.tmdb.org/t/p/original"
     const val THUMB_BASE_URL = "https://image.tmdb.org/t/p/w500"
@@ -179,10 +186,42 @@ object CineOnlineScraper {
         return Pair(cleanName, year)
     }
 
-    suspend fun getOrFetchMovie(context: Context, fileName: String, fallbackTmdbId: String? = null, forceRefresh: Boolean = false): MovieItem? = withContext(Dispatchers.IO) {
+    // --- RESTORED SYNCHRONOUS HOOKS FOR LOCAL SCANNER COMPATIBILITY ---
+    fun searchOnlineMovieMetadata(fileName: String): OnlineMediaMetadata? {
+        return runBlocking {
+            val movie = getOrFetchMovie(null, fileName, null, false)
+            if (movie != null) {
+                OnlineMediaMetadata(
+                    title = movie.title,
+                    plot = movie.plot,
+                    rating = movie.userRating,
+                    posterPath = movie.posterPath,
+                    premiered = movie.premiered
+                )
+            } else null
+        }
+    }
+
+    fun searchOnlineTvMetadata(folderName: String): OnlineMediaMetadata? {
+        return runBlocking {
+            val tv = getOrFetchTvShow(null, folderName, null, false)
+            if (tv != null) {
+                OnlineMediaMetadata(
+                    title = tv.title,
+                    plot = tv.plot,
+                    rating = tv.userRating,
+                    posterPath = tv.posterPath,
+                    premiered = tv.premiered
+                )
+            } else null
+        }
+    }
+
+    // --- ASYNC HIGH-PERFORMANCE DATA PIPELINES ---
+    suspend fun getOrFetchMovie(context: Context?, fileName: String, fallbackTmdbId: String? = null, forceRefresh: Boolean = false): MovieItem? = withContext(Dispatchers.IO) {
         val cacheId = fallbackTmdbId ?: fileName
         
-        if (!forceRefresh) {
+        if (!forceRefresh && context != null) {
             val cached = MetadataCacheManager.loadFromCache<MovieItem>(context, "movie_$cacheId")
             if (cached != null) return@withContext cached
         }
@@ -237,7 +276,7 @@ object CineOnlineScraper {
                         }
 
                         val movieItem = MovieItem(
-                            videoFilePath = "", // Replaced dynamically by scanner
+                            videoFilePath = "",
                             title = details.title,
                             originalTitle = details.title,
                             userRating = details.vote_average,
@@ -258,7 +297,9 @@ object CineOnlineScraper {
                             isMetadataCached = true
                         )
                         
-                        MetadataCacheManager.saveToCache(context, "movie_$cacheId", movieItem)
+                        if (context != null) {
+                            MetadataCacheManager.saveToCache(context, "movie_$cacheId", movieItem)
+                        }
                         return@withContext movieItem
                     }
                 }
@@ -269,10 +310,10 @@ object CineOnlineScraper {
         return@withContext null
     }
 
-    suspend fun getOrFetchTvShow(context: Context, folderName: String, fallbackTmdbId: String? = null, forceRefresh: Boolean = false): TvShowItem? = withContext(Dispatchers.IO) {
+    suspend fun getOrFetchTvShow(context: Context?, folderName: String, fallbackTmdbId: String? = null, forceRefresh: Boolean = false): TvShowItem? = withContext(Dispatchers.IO) {
         val cacheId = fallbackTmdbId ?: folderName
         
-        if (!forceRefresh) {
+        if (!forceRefresh && context != null) {
             val cached = MetadataCacheManager.loadFromCache<TvShowItem>(context, "tv_$cacheId")
             if (cached != null) return@withContext cached
         }
@@ -281,7 +322,6 @@ object CineOnlineScraper {
             val (cleanTitle, year) = cleanMediaFileName(folderName)
             val encodedTitle = URLEncoder.encode(cleanTitle, "UTF-8")
             
-            // TMDB Pipeline
             var searchUrl = "$TMDB_BASE_URL/search/tv?api_key=$API_KEY&query=$encodedTitle&language=en-US"
             if (year != null) searchUrl += "&first_air_date_year=$year"
 
@@ -306,13 +346,12 @@ object CineOnlineScraper {
                             tmdbId = result.id.toString(),
                             isMetadataCached = true
                         )
-                        MetadataCacheManager.saveToCache(context, "tv_$cacheId", tvShow)
+                        if (context != null) MetadataCacheManager.saveToCache(context, "tv_$cacheId", tvShow)
                         return@withContext tvShow
                     }
                 }
             }
             
-            // TVMaze Fallback
             val tvMazeUrl = "$TVMAZE_BASE_URL/search/shows?q=$encodedTitle"
             val reqMaze = Request.Builder().url(tvMazeUrl).build()
             client.newCall(reqMaze).execute().use { response ->
@@ -334,7 +373,7 @@ object CineOnlineScraper {
                             tvdbId = node.externals?.thetvdb?.toString() ?: "",
                             isMetadataCached = true
                         )
-                        MetadataCacheManager.saveToCache(context, "tv_$cacheId", tvShow)
+                        if (context != null) MetadataCacheManager.saveToCache(context, "tv_$cacheId", tvShow)
                         return@withContext tvShow
                     }
                 }
