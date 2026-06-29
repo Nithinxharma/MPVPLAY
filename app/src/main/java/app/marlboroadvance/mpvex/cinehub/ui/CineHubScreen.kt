@@ -40,6 +40,7 @@ import app.marlboroadvance.mpvex.cinehub.data.*
 import app.marlboroadvance.mpvex.youtube.data.InvidiousClient
 import app.marlboroadvance.mpvex.youtube.model.YoutubeVideo
 import app.marlboroadvance.mpvex.ui.browser.components.BrowserTopBar
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -48,11 +49,14 @@ import java.io.File
 fun CineHubScreen(
     moviesList: List<MovieItem>,
     tvShowsList: List<TvShowItem>,
-    onPlayRequested: (filePath: String, cleanTitle: String) -> Unit,
-    onUpdateMediaInfo: (thumbnail: String, title: String, author: String, description: String, metadata: Map<String, String>) -> Unit = { _, _, _, _, _ -> }
+    onPlayRequested: (filePath: String, cleanTitle: String, metadata: Map<String, String>) -> Unit
 ) {
     var tabIndex by remember { mutableIntStateOf(0) }
     val tabs = listOf("Movies", "TV Shows")
+    
+    // Background Synchronized Data Stores
+    val activeLocalMovies = remember { mutableStateListOf<MovieItem>() }
+    val activeLocalTvShows = remember { mutableStateListOf<TvShowItem>() }
     
     var selectedMovie by remember { mutableStateOf<MovieItem?>(null) }
     var selectedTvShow by remember { mutableStateOf<TvShowItem?>(null) }
@@ -72,6 +76,48 @@ fun CineHubScreen(
     val scope = rememberCoroutineScope()
     val configuration = LocalConfiguration.current
     val gridColumnCount = if (configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) 6 else 3
+
+    // Background Metadata Synchronizer Engine
+    LaunchedEffect(moviesList, tvShowsList) {
+        activeLocalMovies.clear()
+        activeLocalMovies.addAll(moviesList)
+        activeLocalTvShows.clear()
+        activeLocalTvShows.addAll(tvShowsList)
+
+        launch(Dispatchers.IO) {
+            for (i in activeLocalMovies.indices) {
+                val movie = activeLocalMovies[i]
+                if (!movie.isMetadataCached) {
+                    val onlineMeta = CineOnlineScraper.getOrFetchMovie(context, File(movie.videoFilePath).name, movie.tmdbId)
+                    if (onlineMeta != null) {
+                        activeLocalMovies[i] = onlineMeta.copy(
+                            videoFilePath = movie.videoFilePath,
+                            posterPath = onlineMeta.posterPath ?: movie.posterPath,
+                            backdropPath = onlineMeta.backdropPath
+                        )
+                    } else {
+                        activeLocalMovies[i] = movie.copy(isMetadataCached = true)
+                    }
+                }
+            }
+            
+            for (i in activeLocalTvShows.indices) {
+                val show = activeLocalTvShows[i]
+                if (!show.isMetadataCached) {
+                    val onlineMeta = CineOnlineScraper.getOrFetchTvShow(context, File(show.folderPath).name, show.tmdbId)
+                    if (onlineMeta != null) {
+                        activeLocalTvShows[i] = onlineMeta.copy(
+                            folderPath = show.folderPath,
+                            posterPath = onlineMeta.posterPath ?: show.posterPath,
+                            backdropPath = onlineMeta.backdropPath
+                        )
+                    } else {
+                        activeLocalTvShows[i] = show.copy(isMetadataCached = true)
+                    }
+                }
+            }
+        }
+    }
 
     LaunchedEffect(tabIndex) {
         if (onlineMovies.isEmpty() || onlineTvShows.isEmpty()) {
@@ -95,15 +141,10 @@ fun CineHubScreen(
                     title = "CineHub Engine",
                     isInSelectionMode = false,
                     selectedCount = 0,
-                    totalCount = moviesList.size + tvShowsList.size,
+                    totalCount = activeLocalMovies.size + activeLocalTvShows.size,
                     onCancelSelection = {},
                     isHomeScreen = true,
-                    onSearchClick = {},
-                    actions = {
-                        IconButton(onClick = { showSettingsSheet = true }) {
-                            Icon(Icons.Default.Settings, contentDescription = "Engine Settings", tint = MaterialTheme.colorScheme.onSurface)
-                        }
-                    }
+                    onSearchClick = {}
                 )
 
                 Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, tonalElevation = 1.dp) {
@@ -132,21 +173,27 @@ fun CineHubScreen(
                         fontWeight = FontWeight.ExtraBold,
                         color = MaterialTheme.colorScheme.primary
                     )
-                    IconButton(onClick = { /* Trigger background rescan via ViewModel */ }, modifier = Modifier.size(24.dp)) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Sync", tint = MaterialTheme.colorScheme.primary)
+                    Row {
+                        IconButton(onClick = { /* Internal Refresher Request Trigger */ }, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Default.Refresh, contentDescription = "Sync", tint = MaterialTheme.colorScheme.primary)
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        IconButton(onClick = { showSettingsSheet = true }, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Default.Settings, contentDescription = "Engine Settings", tint = MaterialTheme.colorScheme.primary)
+                        }
                     }
                 }
             }
 
             item {
                 if (tabIndex == 0) {
-                    if (moviesList.isEmpty()) {
+                    if (activeLocalMovies.isEmpty()) {
                         Box(modifier = Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) {
                             Text("No local files found inside target folders.", fontSize = 13.sp, color = Color.Gray)
                         }
                     } else {
                         LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                            items(moviesList) { movie ->
+                            items(activeLocalMovies) { movie ->
                                 Box(modifier = Modifier.width(135.dp)) {
                                     CineHubGridCard(title = movie.title, genre = movie.genre, rating = movie.userRating, posterPath = movie.posterPath, watchProgress = movie.watchProgress) {
                                         selectedMovie = movie
@@ -156,13 +203,13 @@ fun CineHubScreen(
                         }
                     }
                 } else {
-                    if (tvShowsList.isEmpty()) {
+                    if (activeLocalTvShows.isEmpty()) {
                         Box(modifier = Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) {
                             Text("No local files found inside target folders.", fontSize = 13.sp, color = Color.Gray)
                         }
                     } else {
                         LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                            items(tvShowsList) { show ->
+                            items(activeLocalTvShows) { show ->
                                 Box(modifier = Modifier.width(135.dp)) {
                                     CineHubGridCard(title = show.title, genre = show.genre, rating = show.userRating, posterPath = show.posterPath, watchProgress = show.watchProgress) {
                                         selectedTvShow = show
@@ -205,13 +252,10 @@ fun CineHubScreen(
                                                     val platformCode = movieItem.videoFilePath.substringAfterLast(":")
                                                     val directM3u8 = CineCloudRepoClient.resolveDirectStreamUrl(rawId, platformCode)
                                                     
-                                                    onUpdateMediaInfo(
-                                                        movieItem.posterPath ?: "", movieItem.title, "Cloud Stream", movieItem.plot,
-                                                        mapOf("Genre" to movieItem.genre, "Rating" to movieItem.userRating.toString())
-                                                    )
+                                                    val generatedMetadataMap = mapOf("Genre" to movieItem.genre, "Rating" to movieItem.userRating.toString(), "Plot" to movieItem.plot, "Poster" to (movieItem.posterPath ?: ""))
 
-                                                    if (!directM3u8.isNullOrBlank()) onPlayRequested(directM3u8, movieItem.title)
-                                                    else onPlayRequested("https://net52.cc/mobile/player.php?id=$rawId", movieItem.title)
+                                                    if (!directM3u8.isNullOrBlank()) onPlayRequested(directM3u8, movieItem.title, generatedMetadataMap)
+                                                    else onPlayRequested("https://net52.cc/mobile/player.php?id=$rawId", movieItem.title, generatedMetadataMap)
                                                 }
                                             }
                                         }
@@ -235,13 +279,10 @@ fun CineHubScreen(
                                                     val platformCode = tvShowItem.folderPath.substringAfterLast(":")
                                                     val directM3u8 = CineCloudRepoClient.resolveDirectStreamUrl(rawId, platformCode)
                                                     
-                                                    onUpdateMediaInfo(
-                                                        tvShowItem.posterPath ?: "", tvShowItem.title, "Cloud Network", tvShowItem.plot,
-                                                        mapOf("Genre" to tvShowItem.genre, "Rating" to tvShowItem.userRating.toString())
-                                                    )
+                                                    val generatedMetadataMap = mapOf("Genre" to tvShowItem.genre, "Rating" to tvShowItem.userRating.toString(), "Plot" to tvShowItem.plot, "Poster" to (tvShowItem.posterPath ?: ""))
 
-                                                    if (!directM3u8.isNullOrBlank()) onPlayRequested(directM3u8, tvShowItem.title)
-                                                    else onPlayRequested("https://net52.cc/mobile/player.php?id=$rawId", tvShowItem.title)
+                                                    if (!directM3u8.isNullOrBlank()) onPlayRequested(directM3u8, tvShowItem.title, generatedMetadataMap)
+                                                    else onPlayRequested("https://net52.cc/mobile/player.php?id=$rawId", tvShowItem.title, generatedMetadataMap)
                                                 }
                                             }
                                         }
@@ -337,12 +378,14 @@ fun CineHubScreen(
                                             isRefreshing = true
                                             scope.launch {
                                                 val refreshed = CineOnlineScraper.getOrFetchMovie(context, File(movie.videoFilePath).name, movie.tmdbId, forceRefresh = true)
-                                                if (refreshed != null) selectedMovie = movie.copy().apply {
-                                                    plot = refreshed.plot
-                                                    posterPath = refreshed.posterPath
-                                                    backdropPath = refreshed.backdropPath
-                                                    actors = refreshed.actors
-                                                    collection = refreshed.collection
+                                                if (refreshed != null) {
+                                                    selectedMovie = movie.copy(
+                                                        plot = refreshed.plot,
+                                                        posterPath = refreshed.posterPath,
+                                                        backdropPath = refreshed.backdropPath,
+                                                        actors = refreshed.actors,
+                                                        collection = refreshed.collection
+                                                    )
                                                 }
                                                 isRefreshing = false
                                             }
@@ -397,12 +440,15 @@ fun CineHubScreen(
                             Spacer(modifier = Modifier.height(24.dp))
                             Button(
                                 onClick = {
-                                    onUpdateMediaInfo(
-                                        movie.posterPath ?: "", movie.title, movie.director, movie.plot,
-                                        mapOf("Genre" to movie.genre, "Runtime" to "${movie.runtime}m", "TMDB" to movie.tmdbId)
+                                    val compiledMetadata = mapOf(
+                                        "Genre" to movie.genre,
+                                        "Runtime" to "${movie.runtime}m",
+                                        "TMDB" to movie.tmdbId,
+                                        "Plot" to movie.plot,
+                                        "Poster" to (movie.posterPath ?: "")
                                     )
                                     selectedMovie = null
-                                    onPlayRequested(movie.videoFilePath, movie.title)
+                                    onPlayRequested(movie.videoFilePath, movie.title, compiledMetadata)
                                 },
                                 modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)
                             ) {
@@ -446,7 +492,6 @@ fun CineHubScreen(
                                         if (showPosterPickerFor == "poster") selectedMovie?.posterPath = fullUrl
                                         else selectedMovie?.backdropPath = fullUrl
                                         
-                                        // Save back to JSON Cache
                                         selectedMovie?.let { MetadataCacheManager.saveToCache(context, "movie_${it.tmdbId}", it) }
                                         showPosterPickerFor = null
                                     }
@@ -480,7 +525,7 @@ fun CineHubScreen(
                         Text(actorDetails?.biography?.ifEmpty { "No biography available." } ?: "Loading bio...", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
                         
                         // Cross-reference existing DB for Filmography
-                        val (actorMovies, actorShows) = remember(actor.name) { NfoScanner.getSharedFilmography(actor.name, moviesList, tvShowsList) }
+                        val (actorMovies, actorShows) = remember(actor.name) { NfoScanner.getSharedFilmography(actor.name, activeLocalMovies, activeLocalTvShows) }
                         if (actorMovies.isNotEmpty() || actorShows.isNotEmpty()) {
                             Spacer(modifier = Modifier.height(24.dp))
                             Text("In Your Library", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
