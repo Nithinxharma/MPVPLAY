@@ -98,6 +98,28 @@ fun MediaInfoCard(
         }
     }
 
+    // --- METADATA SYNC ENGINE ---
+    // Automatically extracts rich cinematic metadata passed from CineHubScreen
+    // to override basic player info when playing Movies/TV Shows.
+    val displayArtworkUrl = remember(metadata, artworkUrl) {
+        metadata["Poster"]?.takeIf { it.isNotBlank() } ?: artworkUrl
+    }
+    
+    val displayDescription = remember(metadata, description) {
+        metadata["Plot"]?.takeIf { it.isNotBlank() } ?: description
+    }
+    
+    val displaySubtitle = remember(metadata, subtitle) {
+        metadata["Genre"]?.takeIf { it.isNotBlank() } ?: subtitle
+    }
+
+    // Filter out structural keys so they don't render as raw UI chips
+    val displayMetadata = remember(metadata) {
+        metadata.filterKeys { 
+            it !in listOf("Poster", "Plot", "Genre", "Backdrop", "Logo") 
+        }
+    }
+
     // Wrap in a Box filling maximum bounds so alignment maps naturally inside the caller's overlay
     Box(
         modifier = modifier.fillMaxSize(),
@@ -135,7 +157,7 @@ fun MediaInfoCard(
                         .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
 
                     Box(modifier = imageModifier, contentAlignment = Alignment.Center) {
-                        if (artworkUrl.isNullOrBlank()) {
+                        if (displayArtworkUrl.isNullOrBlank()) {
                             Icon(
                                 imageVector = Icons.Default.Image,
                                 contentDescription = "Placeholder",
@@ -144,7 +166,7 @@ fun MediaInfoCard(
                             )
                         } else {
                             AsyncImage(
-                                model = artworkUrl,
+                                model = displayArtworkUrl,
                                 contentDescription = title,
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier.fillMaxSize()
@@ -171,9 +193,9 @@ fun MediaInfoCard(
                                     maxLines = 2,
                                     overflow = TextOverflow.Ellipsis
                                 )
-                                if (!subtitle.isNullOrBlank()) {
+                                if (!displaySubtitle.isNullOrBlank()) {
                                     Text(
-                                        text = subtitle,
+                                        text = displaySubtitle,
                                         style = MaterialTheme.typography.bodySmall,
                                         fontWeight = FontWeight.Medium,
                                         color = MaterialTheme.colorScheme.primary,
@@ -196,9 +218,9 @@ fun MediaInfoCard(
                             }
                         }
 
-                        if (!description.isNullOrBlank()) {
+                        if (!displayDescription.isNullOrBlank()) {
                             Text(
-                                text = description,
+                                text = displayDescription,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 4,
@@ -206,14 +228,14 @@ fun MediaInfoCard(
                             )
                         }
 
-                        // Dynamic Metadata Map Blocks
-                        if (metadata.isNotEmpty()) {
+                        // Dynamic Metadata Map Blocks (Cleaned)
+                        if (displayMetadata.isNotEmpty()) {
                             FlowRow(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 verticalArrangement = Arrangement.spacedBy(6.dp),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                metadata.forEach { (key, value) ->
+                                displayMetadata.forEach { (key, value) ->
                                     if (value.isNotBlank()) {
                                         Surface(
                                             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
@@ -233,7 +255,7 @@ fun MediaInfoCard(
                         }
                         
                         // Dedicated injection block for explicit Live TV state tracking
-                        if (mediaType == MediaType.LIVE_TV && !metadata.containsKey("EPG")) {
+                        if (mediaType == MediaType.LIVE_TV && !displayMetadata.containsKey("EPG")) {
                             Surface(
                                 color = MaterialTheme.colorScheme.secondaryContainer,
                                 shape = RoundedCornerShape(6.dp)
