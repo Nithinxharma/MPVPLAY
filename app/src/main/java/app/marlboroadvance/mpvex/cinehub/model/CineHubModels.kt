@@ -42,7 +42,10 @@ data class MovieItem(
     var collection: MediaCollection? = null,
     val watchProgress: Float = 0f,
     var actors: List<ActorItem> = emptyList(),
-    var isMetadataCached: Boolean = false
+    var isMetadataCached: Boolean = false,
+    var sourceType: String = "local", // "local" or "drive"
+    var driveFileId: String? = null,
+    var manualMappingId: String? = null
 )
 
 @Serializable
@@ -61,7 +64,10 @@ data class TvShowItem(
     var tvdbId: String = "",
     val watchProgress: Float = 0f,
     var actors: List<ActorItem> = emptyList(),
-    var isMetadataCached: Boolean = false
+    var isMetadataCached: Boolean = false,
+    var sourceType: String = "local",
+    var driveFolderId: String? = null,
+    var manualMappingId: String? = null
 )
 
 @Serializable
@@ -74,5 +80,7 @@ data class EpisodeItem(
     var userRating: Double,
     var aired: String,
     var stillPath: String? = null,
-    val watchProgress: Float = 0f
+    val watchProgress: Float = 0f,
+    var sourceType: String = "local",
+    var driveFileId: String? = null
 )
