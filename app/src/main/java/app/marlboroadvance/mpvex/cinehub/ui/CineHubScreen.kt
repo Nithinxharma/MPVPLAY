@@ -63,8 +63,15 @@ fun CineHubScreen(
     var activeActorLookup by remember { mutableStateOf<ActorItem?>(null) }
     var showSettingsSheet by remember { mutableStateOf(false) }
     
+    // Pickers & Manual States
     var showPosterPickerFor by remember { mutableStateOf<String?>(null) }
     var availableArtworks by remember { mutableStateOf<TMDBImagesResponse?>(null) }
+    var showManualMatchSheet by remember { mutableStateOf(false) }
+    var showCustomEntrySheet by remember { mutableStateOf(false) }
+    var manualSearchQuery by remember { mutableStateOf("") }
+    var manualMovieResults by remember { mutableStateOf<List<TMDBMovieNode>>(emptyList()) }
+    var manualTvResults by remember { mutableStateOf<List<TMDBTvNode>>(emptyList()) }
+    var isManualSearching by remember { mutableStateOf(false) }
     
     var onlineMovies by remember { mutableStateOf<List<MovieItem>>(emptyList()) }
     var onlineTvShows by remember { mutableStateOf<List<TvShowItem>>(emptyList()) }
@@ -93,7 +100,7 @@ fun CineHubScreen(
                             backdropPath = onlineMeta.backdropPath
                         )
                     } else {
-                        activeLocalMovies[i] = movie.copy(isMetadataCached = true)
+                        activeLocalMovies[i] = movie.copy(isMetadataCached = false, plot = "Metadata completely unmapped.")
                     }
                 }
             }
@@ -109,7 +116,7 @@ fun CineHubScreen(
                             backdropPath = onlineMeta.backdropPath
                         )
                     } else {
-                        activeLocalTvShows[i] = show.copy(isMetadataCached = true)
+                        activeLocalTvShows[i] = show.copy(isMetadataCached = false, plot = "Metadata completely unmapped.")
                     }
                 }
             }
@@ -171,7 +178,7 @@ fun CineHubScreen(
                         color = MaterialTheme.colorScheme.primary
                     )
                     Row {
-                        IconButton(onClick = { /* Refresh Action Trigger */ }, modifier = Modifier.size(28.dp)) {
+                        IconButton(onClick = { /* Internal Refresher Request Trigger */ }, modifier = Modifier.size(28.dp)) {
                             Icon(Icons.Default.Refresh, contentDescription = "Sync", tint = MaterialTheme.colorScheme.primary)
                         }
                         Spacer(modifier = Modifier.width(16.dp))
@@ -369,31 +376,44 @@ fun CineHubScreen(
                                     Text(movie.genre, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                                     
                                     Spacer(modifier = Modifier.height(12.dp))
-                                    OutlinedButton(
-                                        onClick = {
-                                            isRefreshing = true
-                                            scope.launch {
-                                                val refreshed = CineOnlineScraper.getOrFetchMovie(context, File(movie.videoFilePath).name, movie.tmdbId, forceRefresh = true)
-                                                if (refreshed != null) {
-                                                    selectedMovie = movie.copy(
-                                                        plot = refreshed.plot,
-                                                        posterPath = refreshed.posterPath,
-                                                        backdropPath = refreshed.backdropPath,
-                                                        actors = refreshed.actors,
-                                                        collection = refreshed.collection
-                                                    )
-                                                }
-                                                isRefreshing = false
-                                            }
-                                        },
-                                        shape = RoundedCornerShape(8.dp),
-                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-                                    ) {
-                                        if (isRefreshing) CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                                        else {
-                                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    if (!movie.isMetadataCached) {
+                                        Button(
+                                            onClick = { showManualMatchSheet = true },
+                                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Icon(Icons.Default.Search, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.size(16.dp))
                                             Spacer(modifier = Modifier.width(6.dp))
-                                            Text("Refresh Metadata", fontSize = 12.sp)
+                                            Text("Match Manually", fontSize = 12.sp, color = MaterialTheme.colorScheme.onErrorContainer)
+                                        }
+                                    } else {
+                                        OutlinedButton(
+                                            onClick = {
+                                                isRefreshing = true
+                                                scope.launch {
+                                                    val refreshed = CineOnlineScraper.getOrFetchMovie(context, File(movie.videoFilePath).name, movie.tmdbId, forceRefresh = true)
+                                                    if (refreshed != null) {
+                                                        selectedMovie = movie.copy(
+                                                            plot = refreshed.plot,
+                                                            posterPath = refreshed.posterPath,
+                                                            backdropPath = refreshed.backdropPath,
+                                                            actors = refreshed.actors,
+                                                            collection = refreshed.collection
+                                                        )
+                                                    }
+                                                    isRefreshing = false
+                                                }
+                                            },
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                                        ) {
+                                            if (isRefreshing) CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                            else {
+                                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text("Refresh Metadata", fontSize = 12.sp)
+                                            }
                                         }
                                     }
                                 }
@@ -441,14 +461,15 @@ fun CineHubScreen(
                                         "Plot" to movie.plot,
                                         "Poster" to (movie.posterPath ?: "")
                                     )
+                                    val playUrl = if (movie.sourceType == "drive") NfoScanner.GoogleDriveScanner.resolveDrivePlaybackUrl(movie.driveFileId ?: "") else movie.videoFilePath
                                     selectedMovie = null
-                                    onPlayRequested(movie.videoFilePath, movie.title, compiledMetadata)
+                                    onPlayRequested(playUrl, movie.title, compiledMetadata)
                                 },
                                 modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)
                             ) {
                                 Icon(Icons.Default.PlayArrow, contentDescription = "Play")
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("Play Full Movie", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                Text(if (movie.sourceType == "drive") "Stream from Google Drive" else "Play Full Movie", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                             }
                             Spacer(modifier = Modifier.height(18.dp))
                             Text("Plot Overview", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -485,6 +506,20 @@ fun CineHubScreen(
                         Text(show.title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold)
                         Text("Studio: ${show.studio} | Genre: ${show.genre} | Rating: ★ ${show.userRating}", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
                         
+                        if (!show.isMetadataCached) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Button(
+                                onClick = { showManualMatchSheet = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.Search, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Match Manually", fontSize = 12.sp, color = MaterialTheme.colorScheme.onErrorContainer)
+                            }
+                        }
+
                         if (show.actors.isNotEmpty()) {
                             Spacer(modifier = Modifier.height(16.dp))
                             Text("Cast", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -532,8 +567,9 @@ fun CineHubScreen(
                                                     "Plot" to episode.plot,
                                                     "Poster" to (show.posterPath ?: "")
                                                 )
+                                                val playUrl = if (episode.sourceType == "drive") NfoScanner.GoogleDriveScanner.resolveDrivePlaybackUrl(episode.driveFileId ?: "") else episode.videoFilePath
                                                 selectedTvShow = null
-                                                onPlayRequested(episode.videoFilePath, "${show.title} - S${episode.season}E${episode.episode}", tvMetadata)
+                                                onPlayRequested(playUrl, "${show.title} - S${episode.season}E${episode.episode}", tvMetadata)
                                             },
                                             colors = IconButtonDefaults.iconButtonColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
                                         ) {
@@ -579,6 +615,108 @@ fun CineHubScreen(
                                         showPosterPickerFor = null
                                     }
                             )
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- MANUAL MATCHING WORKFLOW ---
+        if (showManualMatchSheet) {
+            val isMovie = selectedMovie != null
+            val activeName = if (isMovie) File(selectedMovie!!.videoFilePath).name else File(selectedTvShow!!.folderPath).name
+            val safeName = CineOnlineScraper.cleanMediaFileName(activeName).first
+
+            LaunchedEffect(safeName) { manualSearchQuery = safeName }
+
+            ModalBottomSheet(onDismissRequest = { showManualMatchSheet = false }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+                Column(modifier = Modifier.fillMaxWidth().fillMaxHeight(0.85f).padding(16.dp)) {
+                    Text("Match Manually: $activeName", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    OutlinedTextField(
+                        value = manualSearchQuery,
+                        onValueChange = { manualSearchQuery = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Search TMDB Core") },
+                        trailingIcon = {
+                            IconButton(onClick = {
+                                isManualSearching = true
+                                scope.launch {
+                                    if (isMovie) manualMovieResults = CineOnlineScraper.executeManualMovieSearch(manualSearchQuery)
+                                    else manualTvResults = CineOnlineScraper.executeManualTvSearch(manualSearchQuery)
+                                    isManualSearching = false
+                                }
+                            }) { Icon(Icons.Default.Search, contentDescription = "Search") }
+                        },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    if (isManualSearching) {
+                        Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                    } else {
+                        LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            if (isMovie) {
+                                items(manualMovieResults) { result ->
+                                    Row(modifier = Modifier.fillMaxWidth().clickable {
+                                        ManualMappingManager.saveMapping(context, activeName, result.id.toString())
+                                        scope.launch {
+                                            val refreshed = CineOnlineScraper.getOrFetchMovie(context, activeName, result.id.toString(), forceRefresh = true)
+                                            if (refreshed != null) {
+                                                val ix = activeLocalMovies.indexOfFirst { it.videoFilePath == selectedMovie!!.videoFilePath }
+                                                if (ix != -1) activeLocalMovies[ix] = refreshed
+                                                selectedMovie = refreshed
+                                            }
+                                            showManualMatchSheet = false
+                                        }
+                                    }) {
+                                        AsyncImage(model = result.poster_path?.let { "${CineOnlineScraper.THUMB_BASE_URL}$it" }, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.width(60.dp).aspectRatio(2f/3f).clip(RoundedCornerShape(8.dp)).background(Color.Gray))
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Column {
+                                            Text(result.title ?: "Unknown", fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            Text(result.release_date ?: "", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                                            Text(result.overview ?: "", style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                        }
+                                    }
+                                }
+                            } else {
+                                items(manualTvResults) { result ->
+                                    Row(modifier = Modifier.fillMaxWidth().clickable {
+                                        ManualMappingManager.saveMapping(context, activeName, result.id.toString())
+                                        scope.launch {
+                                            val refreshed = CineOnlineScraper.getOrFetchTvShow(context, activeName, result.id.toString(), forceRefresh = true)
+                                            if (refreshed != null) {
+                                                val ix = activeLocalTvShows.indexOfFirst { it.folderPath == selectedTvShow!!.folderPath }
+                                                if (ix != -1) activeLocalTvShows[ix] = refreshed
+                                                selectedTvShow = refreshed
+                                            }
+                                            showManualMatchSheet = false
+                                        }
+                                    }) {
+                                        AsyncImage(model = result.poster_path?.let { "${CineOnlineScraper.THUMB_BASE_URL}$it" }, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.width(60.dp).aspectRatio(2f/3f).clip(RoundedCornerShape(8.dp)).background(Color.Gray))
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Column {
+                                            Text(result.name ?: "Unknown", fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            Text(result.first_air_date ?: "", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                                            Text(result.overview ?: "", style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            item {
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Button(
+                                    onClick = { 
+                                        showManualMatchSheet = false
+                                        showCustomEntrySheet = true 
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) { Text("Create Custom Entry for Unlisted Media") }
+                            }
                         }
                     }
                 }
@@ -631,14 +769,17 @@ fun CineHubScreen(
         if (showSettingsSheet) {
             ModalBottomSheet(onDismissRequest = { showSettingsSheet = false }) {
                 Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 16.dp).padding(bottom = 24.dp)) {
-                    Text("Metadata Engine Settings", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text("Library & Metadata Settings", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
                     
-                    ListItem(
-                        headlineContent = { Text("Auto-Download Artwork") },
-                        supportingContent = { Text("Posters, backdrops, and logos") },
-                        trailingContent = { Switch(checked = true, onCheckedChange = {}) }
-                    )
+                    Text("Library Sources", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+                    ListItem(headlineContent = { Text("Internal Storage / SD Card") }, trailingContent = { Checkbox(checked = true, onCheckedChange = {}) })
+                    ListItem(headlineContent = { Text("Google Drive (CineRex Folder)") }, supportingContent = { Text("Scan cloud storage for streaming") }, trailingContent = { Switch(checked = true, onCheckedChange = {}) })
+                    
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                    Text("Engine Config", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+
+                    ListItem(headlineContent = { Text("Auto-Download Artwork") }, supportingContent = { Text("Posters, backdrops, and logos") }, trailingContent = { Switch(checked = true, onCheckedChange = {}) })
                     ListItem(
                         headlineContent = { Text("Clear Metadata Cache") },
                         supportingContent = { Text("Force resync from TMDB/TVMaze") },
