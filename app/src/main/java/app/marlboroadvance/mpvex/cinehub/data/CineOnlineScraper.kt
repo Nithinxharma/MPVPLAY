@@ -230,7 +230,7 @@ object CineOnlineScraper {
             val request = Request.Builder().url(url).build()
             client.newCall(request).execute().use { response ->
                 if (response.isSuccessful) {
-                    val body = response.body?.string() ?: return@use emptyList()
+                    val body = response.body?.string() ?: return@use emptyList<TMDBMovieNode>()
                     val parsed = jsonParser.decodeFromString<TMDBMovieSearchWrapper>(body)
                     return@withContext parsed.results
                 }
@@ -246,7 +246,7 @@ object CineOnlineScraper {
             val request = Request.Builder().url(url).build()
             client.newCall(request).execute().use { response ->
                 if (response.isSuccessful) {
-                    val body = response.body?.string() ?: return@use emptyList()
+                    val body = response.body?.string() ?: return@use emptyList<TMDBTvNode>()
                     val parsed = jsonParser.decodeFromString<TMDBTvSearchWrapper>(body)
                     return@withContext parsed.results
                 }
@@ -388,6 +388,7 @@ object CineOnlineScraper {
     suspend fun getOrFetchTvShow(context: Context?, folderName: String, fallbackTmdbId: String? = null, forceRefresh: Boolean = false): TvShowItem? = withContext(Dispatchers.IO) {
         var tmdbId = fallbackTmdbId
         
+        // 1. Check Permanent Manual Mapping
         if (context != null && tmdbId == null) {
             val mappedId = ManualMappingManager.getMapping(context, folderName)
             if (mappedId != null) tmdbId = mappedId
@@ -395,6 +396,7 @@ object CineOnlineScraper {
 
         val cacheId = tmdbId ?: folderName
         
+        // 2. Check JSON Cache
         if (!forceRefresh && context != null) {
             val cached = MetadataCacheManager.loadFromCache<TvShowItem>(context, "tv_$cacheId")
             if (cached != null) return@withContext cached
