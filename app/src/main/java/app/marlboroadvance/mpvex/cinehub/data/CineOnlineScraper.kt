@@ -121,6 +121,38 @@ data class OnlineMediaMetadata(
     val premiered: String
 )
 
+object ManualMappingManager {
+    private val jsonParser = Json { ignoreUnknownKeys = true }
+    private const val MAPPING_FILE = "manual_mappings.json"
+
+    private fun getMappingFile(context: Context): File {
+        val dir = File(context.filesDir, "cinehub_config")
+        if (!dir.exists()) dir.mkdirs()
+        return File(dir, MAPPING_FILE)
+    }
+
+    fun saveMapping(context: Context, filenameOrId: String, tmdbId: String) {
+        val file = getMappingFile(context)
+        val currentMap = loadAllMappings(context).toMutableMap()
+        currentMap[filenameOrId] = tmdbId
+        file.writeText(jsonParser.encodeToString(currentMap))
+    }
+
+    fun getMapping(context: Context, filenameOrId: String): String? {
+        return loadAllMappings(context)[filenameOrId]
+    }
+
+    private fun loadAllMappings(context: Context): Map<String, String> {
+        val file = getMappingFile(context)
+        if (!file.exists()) return emptyMap()
+        return try {
+            jsonParser.decodeFromString<Map<String, String>>(file.readText())
+        } catch (e: Exception) {
+            emptyMap()
+        }
+    }
+}
+
 object MetadataCacheManager {
     val jsonParser = Json { ignoreUnknownKeys = true; coerceInputValues = true }
 
@@ -171,16 +203,13 @@ object CineOnlineScraper {
     private const val TVMAZE_BASE_URL = "https://api.tvmaze.com"
 
     fun cleanMediaFileName(fileName: String): Pair<String, String?> {
-        // Strip base file extension
         var cleanName = fileName.replace(Regex("(?i)\\.(mp4|mkv|avi|mov|webm|flv|ts)\$"), "")
 
-        // Mass strip scene release tags to prevent online lookup failure
-        cleanName = cleanName.replace(Regex("(?i)\\b(1080p|720p|480p|2160p|4k|bluray|web-dl|webrip|hdrip|x264|x265|hevc|10bit|dual|audio|hindi|english|korean|msubs|esubs|moviesmod|org|army|episode\\s*\\d+|season\\s*\\d+|s\\d+e\\d+)\\b.*"), "")
+        // Extended deep regex cleanup
+        cleanName = cleanName.replace(Regex("(?i)\\b(1080p|2160p|480p|720p|4k|bluray|web-dl|webrip|hdrip|hevc|x264|x265|aac|dts|remux|extended|director's cut|dual|audio|hindi|english|korean|msubs|esubs|moviesmod|org|army|episode\\s*\\d+|season\\s*\\d+|s\\d+e\\d+)\\b.*"), "")
 
-        // Clean dots and underscores
         cleanName = cleanName.replace(Regex("[\\.\\-_]"), " ")
 
-        // Extract year 
         val yearRegex = Regex("\\b(19|20)\\d{2}\\b")
         val match = yearRegex.find(cleanName)
         val year = match?.value
@@ -189,10 +218,41 @@ object CineOnlineScraper {
             cleanName = cleanName.substring(0, match.range.first)
         }
         
-        // Remove trailing brackets or parentheses
         cleanName = cleanName.replace(Regex("[\\[\\]\\(\\)]"), " ").replace(Regex("\\s+"), " ").trim()
 
         return Pair(cleanName, year)
+    }
+
+    suspend fun executeManualMovieSearch(query: String): List<TMDBMovieNode> = withContext(Dispatchers.IO) {
+        try {
+            val encodedQuery = URLEncoder.encode(query, "UTF-8")
+            val url = "$TMDB_BASE_URL/search/movie?api_key=$API_KEY&query=$encodedQuery&language=en-US"
+            val request = Request.Builder().url(url).build()
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: return@use emptyList()
+                    val parsed = jsonParser.decodeFromString<TMDBMovieSearchWrapper>(body)
+                    return@withContext parsed.results
+                }
+            }
+        } catch (e: Exception) {}
+        return@withContext emptyList()
+    }
+
+    suspend fun executeManualTvSearch(query: String): List<TMDBTvNode> = withContext(Dispatchers.IO) {
+        try {
+            val encodedQuery = URLEncoder.encode(query, "UTF-8")
+            val url = "$TMDB_BASE_URL/search/tv?api_key=$API_KEY&query=$encodedQuery&language=en-US"
+            val request = Request.Builder().url(url).build()
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: return@use emptyList()
+                    val parsed = jsonParser.decodeFromString<TMDBTvSearchWrapper>(body)
+                    return@withContext parsed.results
+                }
+            }
+        } catch (e: Exception) {}
+        return@withContext emptyList()
     }
 
     fun searchOnlineMovieMetadata(fileName: String): OnlineMediaMetadata? {
@@ -226,15 +286,23 @@ object CineOnlineScraper {
     }
 
     suspend fun getOrFetchMovie(context: Context?, fileName: String, fallbackTmdbId: String? = null, forceRefresh: Boolean = false): MovieItem? = withContext(Dispatchers.IO) {
-        val cacheId = fallbackTmdbId ?: fileName
+        var tmdbId = fallbackTmdbId
         
+        // 1. Check Permanent Manual Mapping
+        if (context != null && tmdbId == null) {
+            val mappedId = ManualMappingManager.getMapping(context, fileName)
+            if (mappedId != null) tmdbId = mappedId
+        }
+
+        val cacheId = tmdbId ?: fileName
+        
+        // 2. Check JSON Cache
         if (!forceRefresh && context != null) {
             val cached = MetadataCacheManager.loadFromCache<MovieItem>(context, "movie_$cacheId")
             if (cached != null) return@withContext cached
         }
 
         try {
-            var tmdbId = fallbackTmdbId
             val (cleanTitle, year) = cleanMediaFileName(fileName)
 
             if (tmdbId.isNullOrBlank()) {
@@ -318,7 +386,14 @@ object CineOnlineScraper {
     }
 
     suspend fun getOrFetchTvShow(context: Context?, folderName: String, fallbackTmdbId: String? = null, forceRefresh: Boolean = false): TvShowItem? = withContext(Dispatchers.IO) {
-        val cacheId = fallbackTmdbId ?: folderName
+        var tmdbId = fallbackTmdbId
+        
+        if (context != null && tmdbId == null) {
+            val mappedId = ManualMappingManager.getMapping(context, folderName)
+            if (mappedId != null) tmdbId = mappedId
+        }
+
+        val cacheId = tmdbId ?: folderName
         
         if (!forceRefresh && context != null) {
             val cached = MetadataCacheManager.loadFromCache<TvShowItem>(context, "tv_$cacheId")
@@ -337,7 +412,8 @@ object CineOnlineScraper {
                 if (res.isSuccessful) {
                     val body = res.body?.string() ?: return@use
                     val parsed = jsonParser.decodeFromString<TMDBTvSearchWrapper>(body)
-                    val result = parsed.results.firstOrNull()
+                    
+                    val result = if (tmdbId != null) parsed.results.find { it.id.toString() == tmdbId } ?: parsed.results.firstOrNull() else parsed.results.firstOrNull()
                     
                     if (result != null) {
                         val tvShow = TvShowItem(

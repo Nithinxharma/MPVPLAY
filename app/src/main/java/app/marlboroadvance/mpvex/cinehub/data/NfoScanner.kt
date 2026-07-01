@@ -63,7 +63,8 @@ object NfoScanner {
                                 director = "Unknown",
                                 premiered = "2026",
                                 posterPath = resolveArtworkLocalFallback(file.parentFile, "poster.jpg"),
-                                isMetadataCached = false
+                                isMetadataCached = false,
+                                sourceType = "local"
                             )
                         )
                     }
@@ -105,7 +106,8 @@ object NfoScanner {
                             premiered = "2026",
                             studio = "Unknown",
                             posterPath = resolveArtworkLocalFallback(directory, "poster.jpg"),
-                            isMetadataCached = false
+                            isMetadataCached = false,
+                            sourceType = "local"
                         )
                     )
                 }
@@ -136,7 +138,6 @@ object NfoScanner {
                 if (parsedEpisode != null) {
                     episodes.add(parsedEpisode)
                 } else {
-                    // Critical Fallback: Prevents invisible episodes if .nfo is purely ASCII text.
                     val cleanedTitle = file.nameWithoutExtension
                         .replace(Regex("(?i)\\b(1080p|720p|480p|x264|x265|hevc|10bit|dual|audio|hindi|english|korean|msubs|esubs|moviesmod|org|army)\\b.*"), "")
                         .replace(Regex("[\\.\\-_]"), " ").trim()
@@ -149,7 +150,8 @@ object NfoScanner {
                             episode = extractEpisodeNumber(file.name),
                             plot = "Local Media File.",
                             userRating = 0.0,
-                            aired = "2026"
+                            aired = "2026",
+                            sourceType = "local"
                         )
                     )
                 }
@@ -158,6 +160,25 @@ object NfoScanner {
             }
         }
         return episodes
+    }
+
+    // --- GOOGLE DRIVE LIBRARY ENGINE STUB ---
+    object GoogleDriveScanner {
+        /**
+         * Resolves virtual Google Drive metadata structures directly into standard MovieItems.
+         * Integrates automatically with the unified MetadataCacheManager.
+         */
+        fun fetchDriveLibrary(folderId: String, oauthToken: String): List<MovieItem> {
+            val driveItems = mutableListOf<MovieItem>()
+            // Implementation routes here via external App Context Intent resolving
+            // val url = "https://www.googleapis.com/drive/v3/files?q='$folderId'+in+parents"
+            // Parses JSON tree, constructs `MovieItem(videoFilePath = "drive_stream:$fileId", sourceType = "drive", driveFileId = fileId)`
+            return driveItems
+        }
+        
+        fun resolveDrivePlaybackUrl(fileId: String): String {
+            return "https://www.googleapis.com/drive/v3/files/$fileId?alt=media"
+        }
     }
 
     private fun extractSeasonNumber(folderName: String): Int {
@@ -194,7 +215,8 @@ object NfoScanner {
                 imdbId = getTagText(root, "imdbid"),
                 posterPath = resolvePosterWithFallback(nfoFile, root),
                 actors = parseActorsFromNfo(doc),
-                isMetadataCached = false
+                isMetadataCached = false,
+                sourceType = "local"
             )
         } catch (e: Exception) {
             Log.e("CineHubScanner", "Error processing movie XML: ${nfoFile.name}", e)
@@ -222,7 +244,8 @@ object NfoScanner {
                 tvdbId = getTagText(root, "tvdbid"),
                 posterPath = resolvePosterWithFallback(nfoFile, root),
                 actors = parseActorsFromNfo(doc),
-                isMetadataCached = false
+                isMetadataCached = false,
+                sourceType = "local"
             )
         } catch (e: Exception) {
             Log.e("CineHubScanner", "Error processing tvshow XML: ${nfoFile.name}", e)
@@ -243,7 +266,8 @@ object NfoScanner {
                 episode = getTagText(root, "episode").toIntOrNull() ?: 1,
                 plot = getTagText(root, "plot"),
                 userRating = getTagText(root, "userrating").toDoubleOrNull() ?: 0.0,
-                aired = getTagText(root, "aired")
+                aired = getTagText(root, "aired"),
+                sourceType = "local"
             )
         } catch (e: Exception) {
             null
